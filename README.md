@@ -6,7 +6,7 @@ Hookd makes song mashups right in your browser. Drop in a few songs, let it find
 
 Your songs never leave your device. Everything, including decoding, mixing and encoding, runs in the browser, so nothing is uploaded and there's no server.
 
-**Live:** _add your Vercel URL here_
+**Live:** https://hookd-sage.vercel.app
 
 ## Features
 
