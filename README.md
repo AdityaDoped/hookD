@@ -33,7 +33,7 @@ Video export needs the WebCodecs API. Where it isn't available, the button is di
 
 ## Run it locally
 
-It's a single static page with no build step:
+It's a static site with no build step. `index.html` holds the page and styles, and `app.js` holds the app.
 
 ```sh
 npx serve .
@@ -45,7 +45,7 @@ Then open the printed address. Opening `index.html` directly from disk mostly wo
 
 ## Deploy
 
-The repo deploys to [Vercel](https://vercel.com) as a static site with no settings: go to **Add New → Project**, import this repo, and deploy. Every push to `main` goes live, and every branch or pull request gets its own preview URL. `vercel.json` adds security headers.
+The repo deploys to [Vercel](https://vercel.com) as a static site with no settings: go to **Add New → Project**, import this repo, and deploy. Every push to `main` goes live, and every branch or pull request gets its own preview URL. `vercel.json` adds security headers, including a Content-Security-Policy that only allows scripts from this site and the two pinned CDNs. If you add a script or font from somewhere new, add its origin there too.
 
 ## Built with
 
@@ -53,5 +53,9 @@ The repo deploys to [Vercel](https://vercel.com) as a static site with no settin
 - [lamejs](https://github.com/zhuker/lamejs) for MP3 encoding (LGPL, loaded unmodified from cdnjs)
 - [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) and [webm-muxer](https://github.com/Vanilagy/webm-muxer) for video files (MIT)
 - Fonts: Yatra One, Figtree and JetBrains Mono from Google Fonts
+
+## License
+
+The code is under the [MIT License](LICENSE). The libraries and fonts above keep their own licenses. Privacy, terms and copyright details are on the site at [/legal](https://hookd-sage.vercel.app/legal), and security reports go through [SECURITY.md](SECURITY.md).
 
 Please only mash up music you have the right to use.
