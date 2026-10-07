@@ -215,7 +215,7 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 
 /* Video editor */
 .ved { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); align-items: start; }
-@media (min-width: 940px) { .ved { grid-template-columns: 300px minmax(0, 1fr); } }
+@media (min-width: 940px) { .ved { grid-template-columns: 330px minmax(0, 1fr); } }
 @media (max-width: 939px) { .vstage { order: -1; } }
 .vtools { display: grid; gap: 16px; }
 .vpanel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: grid; gap: 10px; }
@@ -228,9 +228,23 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .vpanel progress { width: 100%; accent-color: var(--accent); height: 6px; }
 .vpanel small { color: var(--muted); font-size: 12.5px; }
 .vstage { display: grid; gap: 10px; min-width: 0; }
-.vprev { position: relative; aspect-ratio: 16 / 9; max-height: 56vh; width: 100%; background: #000; border-radius: 14px; overflow: hidden; }
-.vprev video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; visibility: hidden; }
-.vprev video.on { visibility: visible; }
+.vprev { position: relative; width: 100%; aspect-ratio: 16 / 9; margin-inline: auto; background: #000; border-radius: 14px; overflow: hidden; }
+/* the players sit under the canvas; the preview is drawn onto the canvas */
+.vprev video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.vprev canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
+.vtabs { display: flex; }
+.vtabs button { flex: 1 1 auto; padding: 6px 6px; font-size: 12.5px; }
+.vtab { display: grid; gap: 10px; }
+.vform { display: grid; gap: 8px; }
+.vform select, .vtab > select { width: 100%; }
+.vtab .btn { justify-self: start; }
+.vmusic { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.vshapes { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
+.vshapes button { display: grid; justify-items: center; gap: 6px; padding: 10px 4px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); }
+.vshapes button i { display: block; height: 28px; max-width: 44px; border: 2px solid currentColor; border-radius: 3px; }
+.vshapes button[aria-pressed="true"] { border-color: var(--accent); color: var(--ink); box-shadow: 0 0 0 1px var(--accent) inset; }
+.vshapes button[aria-pressed="true"] i { color: var(--accent); }
+#vFitSeg { justify-self: start; }
 .vempty { position: absolute; inset: 0; display: grid; place-items: center; color: #A999AC; font-size: 15px; }
 .vtransport { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .vtransport .btn { min-width: 84px; }
@@ -486,18 +500,96 @@ img { max-width: 100%; }
     <div class="ved">
       <aside class="vtools">
         <div class="vpanel">
-          <h2>Clips</h2>
-          <button type="button" class="btn primary" id="vAdd">Add videos</button>
-          <input type="file" id="vFileIn" accept="video/mp4,video/quicktime,.mp4,.mov,.m4v" multiple hidden>
-          <p class="vhelp">MP4 or MOV, or drop them anywhere on this page. They join up in order.</p>
-          <div class="vedit">
-            <button type="button" class="btn" id="vSplit" title="Split the clip at the playhead (S)">Split</button>
-            <button type="button" class="btn" id="vDelete" title="Remove the selected clip (Delete)">Delete</button>
-            <button type="button" class="btn quiet" id="vUndo" title="Undo (Ctrl+Z)">Undo</button>
-            <button type="button" class="btn quiet" id="vRedo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+          <div class="seg vtabs" id="vTabs" role="group" aria-label="Tools">
+            <button type="button" data-tab="clips" aria-pressed="true">Clips</button>
+            <button type="button" data-tab="trans" aria-pressed="false">Transitions</button>
+            <button type="button" data-tab="music" aria-pressed="false">Music</button>
+            <button type="button" data-tab="title" aria-pressed="false">Title</button>
+            <button type="button" data-tab="shape" aria-pressed="false">Shape</button>
           </div>
-          <p class="vhelp"><strong>Cut out a mistake:</strong> put the playhead where it starts and press Split, move to where it ends and Split again, then click the middle piece and press Delete.</p>
-          <p class="vhelp">Drag a clip's edge to trim it. Drag a clip to move it.</p>
+
+          <div class="vtab" data-panel="clips">
+            <button type="button" class="btn primary" id="vAdd">Add videos</button>
+            <input type="file" id="vFileIn" accept="video/mp4,video/quicktime,.mp4,.mov,.m4v" multiple hidden>
+            <p class="vhelp">MP4 or MOV, or drop them anywhere on this page. They join up in order.</p>
+            <div class="vedit">
+              <button type="button" class="btn" id="vSplit" title="Split the clip at the playhead (S)">Split</button>
+              <button type="button" class="btn" id="vDelete" title="Remove the selected clip (Delete)">Delete</button>
+              <button type="button" class="btn quiet" id="vUndo" title="Undo (Ctrl+Z)">Undo</button>
+              <button type="button" class="btn quiet" id="vRedo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+            </div>
+            <p class="vhelp"><strong>Cut out a mistake:</strong> put the playhead where it starts and press Split, move to where it ends and Split again, then click the middle piece and press Delete.</p>
+            <p class="vhelp">Drag a clip's edge to trim it. Drag a clip to move it.</p>
+          </div>
+
+          <div class="vtab" data-panel="trans" hidden>
+            <p class="vhelp" id="vTransHelp">Click a <span aria-hidden="true">◆</span> between two clips on the timeline to choose how one changes into the next.</p>
+            <div class="vform" id="vTransEdit" hidden>
+              <p class="vhelp" id="vTransWhich"></p>
+              <label class="label" for="vTransType">Transition</label>
+              <select id="vTransType">
+                <option value="cut">Cut (straight to the next clip)</option>
+                <option value="crossfade">Crossfade</option>
+                <option value="black">Fade through black</option>
+                <option value="zoom">Quick zoom</option>
+              </select>
+              <label class="label" for="vTransDur">Length</label>
+              <select id="vTransDur">
+                <option value="0.3">Short (0.3 s)</option>
+                <option value="0.6">Medium (0.6 s)</option>
+                <option value="1">Long (1 s)</option>
+              </select>
+            </div>
+            <button type="button" class="btn" id="vTransAll">Use this for every cut</button>
+            <p class="vhelp">Every cut gets a tiny sound fade, so joins never click.</p>
+          </div>
+
+          <div class="vtab" data-panel="music" hidden>
+            <button type="button" class="btn" id="vMusicAdd">Add music</button>
+            <input type="file" id="vMusicIn" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.opus,.flac" hidden>
+            <div class="vform" id="vMusicSet" hidden>
+              <p class="vmusic"><span id="vMusicName"></span> <button type="button" class="btn quiet" id="vMusicDel">Remove</button></p>
+              <label class="label" for="vMusicVol">Music volume</label>
+              <input type="range" id="vMusicVol" min="0" max="100" value="25">
+              <label class="check"><input type="checkbox" id="vDuck"><span>Lower the music while I talk<small>The music dips whenever someone speaks and comes back up in the pauses.</small></span></label>
+            </div>
+            <p class="vhelp">Plays under the whole video, repeats if it's shorter, and fades out at the end. Only use music you have the right to use.</p>
+          </div>
+
+          <div class="vtab" data-panel="title" hidden>
+            <label class="check"><input type="checkbox" id="vTitleOn"><span>Show a title card at the start</span></label>
+            <div class="vform">
+              <label class="label" for="vTitleText">Title</label>
+              <input id="vTitleText" class="vname" maxlength="80" placeholder="Lesson 1: Getting started" autocomplete="off">
+              <label class="label" for="vTitleSub">Second line (optional)</label>
+              <input id="vTitleSub" class="vname" maxlength="80" placeholder="Your name or topic" autocomplete="off">
+              <label class="label" for="vTitleDur">Show it for</label>
+              <select id="vTitleDur">
+                <option value="2">2 seconds</option>
+                <option value="3" selected>3 seconds</option>
+                <option value="4">4 seconds</option>
+                <option value="5">5 seconds</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="vtab" data-panel="shape" hidden>
+            <span class="label">Shape</span>
+            <div class="vshapes" id="vShapes" role="group" aria-label="Shape">
+              <button type="button" data-shape="original" aria-pressed="true"><i style="aspect-ratio:3/2"></i>Same as video</button>
+              <button type="button" data-shape="wide" aria-pressed="false"><i style="aspect-ratio:16/9"></i>Wide 16:9</button>
+              <button type="button" data-shape="square" aria-pressed="false"><i style="aspect-ratio:1"></i>Square 1:1</button>
+              <button type="button" data-shape="portrait" aria-pressed="false"><i style="aspect-ratio:4/5"></i>Portrait 4:5</button>
+              <button type="button" data-shape="vertical" aria-pressed="false"><i style="aspect-ratio:9/16"></i>Vertical 9:16</button>
+            </div>
+            <span class="label">If the video doesn't fill the shape</span>
+            <div class="seg" id="vFitSeg" role="group" aria-label="If the video doesn't fill the shape">
+              <button type="button" data-fit="fit" aria-pressed="true">Blurred background</button>
+              <button type="button" data-fit="fill" aria-pressed="false">Crop to fill</button>
+            </div>
+            <p class="vhelp" id="vShapeOut"></p>
+            <p class="vhelp">Square and Portrait fill more of the screen in phone feeds. Screen recordings look best Wide.</p>
+          </div>
         </div>
         <div class="vpanel">
           <h2>Export</h2>
@@ -509,9 +601,10 @@ img { max-width: 100%; }
         </div>
       </aside>
       <div class="vstage">
-        <div class="vprev">
+        <div class="vprev" id="vPrevBox">
           <video id="vA" playsinline preload="auto"></video>
           <video id="vB" playsinline preload="auto"></video>
+          <canvas id="vCanvas" role="img" aria-label="Preview of your video"></canvas>
           <div class="vempty" id="vEmpty">Add a video to start editing</div>
         </div>
         <div class="vtransport">
