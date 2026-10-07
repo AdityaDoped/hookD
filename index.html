@@ -232,8 +232,23 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 /* the players sit under the canvas; the preview is drawn onto the canvas */
 .vprev video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .vprev canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
-.vtabs { display: flex; }
-.vtabs button { flex: 1 1 auto; padding: 6px 6px; font-size: 12.5px; }
+.vtabs { display: grid; grid-template-columns: repeat(3, 1fr); border-radius: 14px; }
+.vtabs button { padding: 6px 6px; font-size: 13px; border-radius: 11px; }
+.vcap-auto { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px 10px; }
+.vcap-auto select { min-width: 0; font-size: 13.5px; }
+.vtab progress { width: 100%; accent-color: var(--accent); height: 6px; }
+.vcap-head { display: flex; justify-content: space-between; align-items: baseline; }
+.vcap-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 300px; overflow-y: auto; }
+.vcap-list:empty { display: none; }
+.vcap { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: start; padding: 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+.vcap.now { border-color: var(--t4); }
+.vcap.sel { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink) inset; }
+.vcap-time { border: 0; background: var(--sunk); color: var(--muted); border-radius: 6px; padding: 4px 6px; font-size: 12px; cursor: pointer; }
+.vcap-time:hover { color: var(--ink); }
+.vcap textarea { width: 100%; min-width: 0; resize: none; field-sizing: content; min-height: 2lh; border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 13.5px; color: inherit; }
+.vcap textarea:hover, .vcap textarea:focus { border-color: var(--line); background: var(--surface); }
+.vcap .icon-btn { width: 28px; height: 28px; }
+.vcap-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .vtab { display: grid; gap: 10px; }
 .vform { display: grid; gap: 8px; }
 .vform select, .vtab > select { width: 100%; }
@@ -502,6 +517,7 @@ img { max-width: 100%; }
         <div class="vpanel">
           <div class="seg vtabs" id="vTabs" role="group" aria-label="Tools">
             <button type="button" data-tab="clips" aria-pressed="true">Clips</button>
+            <button type="button" data-tab="caps" aria-pressed="false">Captions</button>
             <button type="button" data-tab="trans" aria-pressed="false">Transitions</button>
             <button type="button" data-tab="music" aria-pressed="false">Music</button>
             <button type="button" data-tab="title" aria-pressed="false">Title</button>
@@ -520,6 +536,55 @@ img { max-width: 100%; }
             </div>
             <p class="vhelp"><strong>Cut out a mistake:</strong> put the playhead where it starts and press Split, move to where it ends and Split again, then click the middle piece and press Delete.</p>
             <p class="vhelp">Drag a clip's edge to trim it. Drag a clip to move it.</p>
+          </div>
+
+          <div class="vtab" data-panel="caps" hidden>
+            <div class="vform">
+              <div class="vcap-auto">
+                <label class="label" for="vCapLang">Language</label>
+                <select id="vCapLang">
+                  <option value="en">English</option>
+                  <option value="hi">Hindi</option>
+                  <option value="">Detect it for me</option>
+                </select>
+                <label class="label" for="vCapModel">Listening</label>
+                <select id="vCapModel">
+                  <option value="base">Standard (80 MB download)</option>
+                  <option value="small">More accurate, slower (250 MB)</option>
+                </select>
+              </div>
+              <button type="button" class="btn" id="vCapAuto">Make captions automatically</button>
+              <progress id="vCapProg" max="1" hidden></progress>
+              <small class="vhelp" id="vCapNote" aria-live="polite"></small>
+              <p class="vhelp">Runs on this device. The speech model downloads once from Hugging Face; your video's sound never leaves your computer.</p>
+            </div>
+            <div class="vedit">
+              <button type="button" class="btn" id="vCapAdd" title="Add a caption at the playhead (C)">Add caption</button>
+              <button type="button" class="btn quiet" id="vCapImport">Import .srt</button>
+              <input type="file" id="vCapIn" accept=".srt,.vtt,text/vtt,application/x-subrip" hidden>
+            </div>
+            <div class="vcap-head"><span class="label">Your captions</span><span class="vhelp" id="vCapCount"></span></div>
+            <p class="vhelp" id="vCapEmpty">No captions yet. Make them automatically, or press Add caption to type your own.</p>
+            <ol class="vcap-list" id="vCapList"></ol>
+            <span class="label">Look</span>
+            <div class="seg" id="vCapStyle" role="group" aria-label="Caption style">
+              <button type="button" data-style="bar" aria-pressed="true">Subtitle bar</button>
+              <button type="button" data-style="bold" aria-pressed="false">Bold words</button>
+            </div>
+            <div class="vcap-row">
+              <div class="seg" id="vCapSize" role="group" aria-label="Caption size">
+                <button type="button" data-size="s" aria-pressed="false">S</button>
+                <button type="button" data-size="m" aria-pressed="true">M</button>
+                <button type="button" data-size="l" aria-pressed="false">L</button>
+              </div>
+              <div class="seg" id="vCapPos" role="group" aria-label="Caption position">
+                <button type="button" data-pos="bottom" aria-pressed="true">Bottom</button>
+                <button type="button" data-pos="middle" aria-pressed="false">Middle</button>
+              </div>
+            </div>
+            <label class="check"><input type="checkbox" id="vCapBurn" checked><span>Show captions in the exported video<small>Everyone sees them, styled as above.</small></span></label>
+            <button type="button" class="btn quiet" id="vCapSrt">Save captions as .srt</button>
+            <p class="vhelp">An .srt file can be added to a LinkedIn post separately, so viewers can switch captions on or off.</p>
           </div>
 
           <div class="vtab" data-panel="trans" hidden>

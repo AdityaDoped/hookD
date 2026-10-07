@@ -12,6 +12,8 @@ const V = {
   title: { on: false, text: "", sub: "", dur: 3 },
   shape: "original", fit: "fit",
   music: null,   // { name, buffer, vol, duck }
+  // captions live in source time ({ id, src, s, e, text }), so cuts and moves carry them along
+  caps: [], selCap: null, capLook: { style: "bar", size: "m", pos: "bottom", burn: true },
 };
 const MIN_CLIP = 0.1;     // shortest piece a split or trim may leave, in seconds
 const PEAKS_PER_SEC = 100;
@@ -389,6 +391,129 @@ function musicGain(P, t) {
   return V.music.vol * d * Math.max(0, Math.min(fadeIn, fadeOut));
 }
 
+/* ---------- Captions ---------- */
+// Where each caption shows on the timeline: every clip shows the captions of its own
+// stretch of video, trimmed at the clip's edges.
+let capCache = { key: "", list: [] };
+function capsOnTimeline(P) {
+  if (capCache.key === String(V.version)) return capCache.list;
+  const list = [];
+  for (const it of P.items) {
+    if (it.kind !== "clip") continue;
+    for (const cap of V.caps) {
+      if (cap.src !== it.c.src || cap.e <= it.c.in || cap.s >= it.c.out) continue;
+      list.push({ cap, it, t0: it.start + Math.max(cap.s, it.c.in) - it.c.in, t1: it.start + Math.min(cap.e, it.c.out) - it.c.in });
+    }
+  }
+  list.sort((a, b) => a.t0 - b.t0);
+  capCache = { key: String(V.version), list };
+  return list;
+}
+function capAt(P, t) {
+  let hitCap = null;
+  for (const x of capsOnTimeline(P)) { if (x.t0 > t) break; if (t < x.t1 && x.cap.text.trim()) hitCap = x; }
+  return hitCap;
+}
+// Long lines from speech recognition become several short captions, timed by length.
+const CAP_MAX = 64;   // characters: about two lines on a phone
+function splitCaption(s, e, text) {
+  text = text.replace(/\s+/g, " ").trim();
+  if (!text) return [];
+  // whole sentences together where they fit; a long sentence splits into even pieces
+  const sentences = text.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g).map(x => x.trim()).filter(Boolean), parts = [];
+  let cur = "";
+  for (const snt of sentences) {
+    if (snt.length > CAP_MAX) { if (cur) parts.push(cur); cur = ""; parts.push(...evenSplit(snt)); continue; }
+    if (cur && (cur + " " + snt).length > CAP_MAX) { parts.push(cur); cur = snt; } else cur = cur ? cur + " " + snt : snt;
+  }
+  if (cur) parts.push(cur);
+  const total = parts.reduce((a, p) => a + p.length + 4, 0);
+  let t = s;
+  return parts.map(p => { const d = (e - s) * (p.length + 4) / total, out = { s: t, e: t + d, text: p }; t += d; return out; });
+}
+// A long sentence in pieces of similar length, breaking after a comma when one is close.
+function evenSplit(text) {
+  const words = text.split(" "), n = Math.ceil(text.length / CAP_MAX), target = text.length / n, out = [];
+  let cur = "";
+  for (const w of words) {
+    const next = cur ? cur + " " + w : w;
+    const full = next.length > CAP_MAX || (out.length < n - 1 && next.length > target * 1.1) || (cur.length >= target * 0.7 && /,$/.test(cur));
+    if (cur && full) { out.push(cur); cur = w; } else cur = next;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+// Each word's share of the caption's time, by length; the bold style lights up the word being said.
+function wordTimes(cap) {
+  const words = cap.text.trim().split(/\s+/), weight = words.map(w => w.length + 2), sum = weight.reduce((a, b) => a + b, 0);
+  let t = cap.s;
+  return words.map((w, i) => { const d = (cap.e - cap.s) * weight[i] / sum, out = { w, s: t, e: t + d }; t += d; return out; });
+}
+const CAP_SIZE = { bar: { s: 0.04, m: 0.05, l: 0.062 }, bold: { s: 0.062, m: 0.078, l: 0.095 } };
+function drawCaption(g, W, H, x, t) {
+  const L = V.capLook, u = Math.min(W, H), fs = Math.round(u * CAP_SIZE[L.style][L.size]);
+  const cy = L.pos === "middle" ? H * 0.55 : H * (H > W ? 0.76 : 0.84);
+  g.save(); g.globalAlpha = 1; g.textAlign = "center"; g.textBaseline = "middle";
+  if (L.style === "bar") {
+    g.font = `600 ${fs}px Figtree, system-ui, sans-serif`;
+    const lines = wrapLines(g, x.cap.text.trim(), W * 0.84), lh = fs * 1.3, pad = fs * 0.45;
+    const w = Math.max(...lines.map(l => g.measureText(l).width)) + pad * 2, h = lines.length * lh + pad * 0.8;
+    g.fillStyle = "rgba(0,0,0,.62)";
+    g.beginPath(); g.roundRect(W / 2 - w / 2, cy - h / 2, w, h, fs * 0.3); g.fill();
+    g.fillStyle = "#FFFFFF";
+    lines.forEach((l, i) => g.fillText(l, W / 2, cy - (lines.length - 1) * lh / 2 + i * lh));
+  } else {
+    // a few words at a time, the one being said in gold
+    const st = x.it.c.in + (t - x.it.start), words = wordTimes(x.cap);
+    let k = words.findIndex(w => st < w.e); if (k < 0) k = words.length - 1;
+    const groups = [];
+    let cur = [];
+    words.forEach((w, i) => { if (cur.length && (cur.length >= 4 || cur.reduce((a, j) => a + words[j].w.length + 1, 0) + w.w.length > 22)) { groups.push(cur); cur = []; } cur.push(i); });
+    if (cur.length) groups.push(cur);
+    const grp = groups.find(gp => gp.includes(k)) || groups[0];
+    g.font = `800 ${fs}px Figtree, system-ui, sans-serif`;
+    g.lineJoin = "round"; g.lineWidth = fs * 0.18; g.strokeStyle = "rgba(0,0,0,.9)";
+    const space = g.measureText(" ").width, widths = grp.map(i => g.measureText(words[i].w).width);
+    // wrap the group if it is wider than the frame
+    const rows = [[]];
+    let rw = 0;
+    grp.forEach((i, n) => { const ww = widths[n]; if (rows.at(-1).length && rw + space + ww > W * 0.88) { rows.push([]); rw = 0; } rows.at(-1).push(n); rw += (rw ? space : 0) + ww; });
+    const lh = fs * 1.15;
+    rows.forEach((row, r) => {
+      const total = row.reduce((a, n) => a + widths[n], 0) + space * (row.length - 1);
+      let xx = W / 2 - total / 2;
+      const yy = cy - (rows.length - 1) * lh / 2 + r * lh;
+      g.textAlign = "left";
+      for (const n of row) {
+        const i = grp.at(n), w = words[i].w;
+        g.strokeText(w, xx, yy);
+        g.fillStyle = i === k ? "#FFC24A" : "#FFFFFF";
+        g.fillText(w, xx, yy);
+        xx += widths[n] + space;
+      }
+    });
+  }
+  g.restore();
+}
+const srtTime = t => {
+  const ms = Math.max(0, Math.round(t * 1000)), h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(ms % 1000).padStart(3, "0")}`;
+};
+function captionsSrt(P) {
+  return capsOnTimeline(P).filter(x => x.cap.text.trim())
+    .map((x, i) => `${i + 1}\n${srtTime(x.t0)} --> ${srtTime(x.t1)}\n${x.cap.text.trim()}\n`).join("\n");
+}
+// SRT or WebVTT cues, in the edited video's time.
+function parseSubs(text) {
+  const out = [], re = /(?:(\d+):)?(\d{1,2}):(\d{2})[,.](\d{1,3})\s*-->\s*(?:(\d+):)?(\d{1,2}):(\d{2})[,.](\d{1,3})[^\n]*\n([\s\S]*?)(?=\n\s*\n|$)/g;
+  const sec = (h, m, s, ms) => (+h || 0) * 3600 + +m * 60 + +s + +ms.padEnd(3, "0") / 1000;
+  for (const m of text.replace(/\r/g, "").matchAll(re)) {
+    const body = m[9].replace(/<[^>]+>/g, "").trim();
+    if (body) out.push({ t0: sec(m[1], m[2], m[3], m[4]), t1: sec(m[5], m[6], m[7], m[8]), text: body.replace(/\n+/g, " ") });
+  }
+  return out;
+}
+
 /* ---------- Picture: shared by the preview and the export ---------- */
 const SHAPES = { original: null, wide: [16, 9], square: [1, 1], portrait: [4, 5], vertical: [9, 16] };
 const even = x => Math.max(2, Math.round(x / 2) * 2);
@@ -452,6 +577,7 @@ function compose(g, W, H, st, getImg) {
     if (L.it.kind === "title") drawTitle(g, W, H, L.alpha);
     else { const m = getImg(L); if (m) drawMedia(g, W, H, m, L.scale, L.alpha); }
   }
+  if (st.cap) drawCaption(g, W, H, st.cap, st.t);
   if (st.black > 0) { g.globalAlpha = Math.min(1, st.black); g.fillStyle = "#000"; g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
 }
 
@@ -470,10 +596,10 @@ function changed() {
   V.T = clamp(V.T, 0, vtotal());
   V.sel = V.clips.length ? Math.min(V.sel, V.clips.length - 1) : -1;
   if (V.selJoin < 1 || V.selJoin >= V.clips.length) V.selJoin = -1;
-  sizeTimeline(); sizePreview(); vtick(); updateUi();
+  sizeTimeline(); sizePreview(); renderCapList(); vtick(); updateUi();
 }
 // Settings outside the undo history (music, title, shape) just redraw.
-function settingsChanged() { V.version++; V.T = clamp(V.T, 0, vtotal()); sizeTimeline(); sizePreview(); vtick(); updateUi(); }
+function settingsChanged() { V.version++; V.T = clamp(V.T, 0, vtotal()); sizeTimeline(); sizePreview(); renderCapList(); vtick(); updateUi(); }
 
 /* ---------- Editing ---------- */
 function splitAtPlayhead() {
@@ -484,7 +610,7 @@ function splitAtPlayhead() {
   if (s - c.in < MIN_CLIP || c.out - s < MIN_CLIP) { vStatus("Move the playhead a little away from the edge of the clip to split it."); return; }
   const before = snap();
   V.clips.splice(L.i, 1, { ...c, id: V.nextId++, out: s }, { ...c, id: V.nextId++, in: s, trans: null });
-  V.sel = L.i + 1; V.selJoin = -1;
+  V.sel = L.i + 1; V.selJoin = -1; V.selCap = null;
   commit(before);
   vStatus("Split. Select a piece and press Delete to remove it.");
 }
@@ -599,6 +725,8 @@ function vtick() {
   if (mus) mus.g.gain.setTargetAtTime(musicGain(P, V.T), audio().currentTime, 0.03);
   // draw only when every picture on screen is ready, so seeking never flashes black
   const st = layersAt(P, V.T), imgs = new Map();
+  st.cap = capAt(P, V.T); st.t = V.T;
+  markActiveCap(st.cap);
   for (const L of st.layers) {
     if (L.it.kind !== "clip") continue;
     const e = pv.map.get(L.it.c.id);
@@ -612,7 +740,7 @@ function vtick() {
 }
 
 /* ---------- Timeline drawing ---------- */
-const tl = { box: $("#vtl"), inner: $("#vtlInner"), cv: $("#vtlCanvas"), pad: 16, h: 156, clipY: 30, clipH: 84, musY: 122, musH: 26, drag: null, col: null };
+const tl = { box: $("#vtl"), inner: $("#vtlInner"), cv: $("#vtlCanvas"), pad: 16, h: 182, clipY: 30, clipH: 84, capY: 119, capH: 24, musY: 149, musH: 26, drag: null, col: null };
 const fitPps = () => (tl.box.clientWidth - 2 * tl.pad) / Math.max(vtotal(), 1);
 // the scale holds still during a drag, so a trimmed edge stays under the pointer
 const pps = () => (tl.drag && tl.drag.pps) || fitPps() * V.zoom;
@@ -678,7 +806,8 @@ function drawTimeline() {
     g.fillStyle = C.accent; g.fillRect(Math.round(at) - 1, tl.clipY - 4, 3, tl.clipH + 8);
     drawClip(g, c, x0, x0 + w, true, 0.75);
   }
-  // music lane
+  // captions and music lanes
+  drawCapLane(g, P, W);
   if (V.music) drawMusic(g, P, W);
   // playhead
   const x = Math.round(xOf(V.T));
@@ -739,6 +868,26 @@ function drawJoin(g, x, type, selected) {
   g.fillStyle = type === "cut" ? C.surface : C.accent; g.fill();
   g.lineWidth = selected ? 2.5 : 1.25; g.strokeStyle = selected ? C.ink : (type === "cut" ? C.muted : C.accent); g.stroke();
 }
+function drawCapLane(g, P, W) {
+  const C = tl.col, y = tl.capY, h = tl.capH, list = capsOnTimeline(P);
+  if (!list.length) return;
+  g.save();
+  g.font = `600 11.5px ${C.body || "sans-serif"}`; g.textBaseline = "middle";
+  for (const x of list) {
+    const x0 = xOf(x.t0), x1 = xOf(x.t1);
+    if (x1 < 0 || x0 > W) continue;
+    const sel = x.cap.id === V.selCap, w = Math.max(3, x1 - x0 - 2);
+    g.save();
+    roundBox(g, x0 + 1, y, w, h, C.surface);
+    g.globalAlpha = 0.22; g.fillStyle = C.t[3]; g.fill(); g.globalAlpha = 1;
+    g.lineWidth = sel ? 2.5 : 1; g.strokeStyle = sel ? C.ink : C.t[3]; g.stroke();
+    g.clip();
+    g.fillStyle = C.ink;
+    if (w > 24) g.fillText(x.cap.text.trim() || "(empty)", x0 + 6, y + h / 2);   // the clip cuts off what doesn't fit
+    g.restore();
+  }
+  g.restore();
+}
 function drawMusic(g, P, W) {
   const C = tl.col, y = tl.musY, h = tl.musH, x0 = xOf(0), x1 = xOf(P.total);
   g.save();
@@ -759,6 +908,16 @@ function drawMusic(g, P, W) {
 /* ---------- Timeline pointer: select, scrub, trim, reorder, transitions ---------- */
 const EDGE = 7;
 function hit(x, y) {
+  if (y >= tl.capY && y <= tl.capY + tl.capH) {
+    const list = capsOnTimeline(vplan());
+    for (const c of [...list].reverse()) {
+      const x0 = xOf(c.t0), x1 = xOf(c.t1);
+      if (x < x0 - EDGE || x > x1 + EDGE) continue;
+      const wide = x1 - x0 > 3 * EDGE;
+      return { cap: c, edge: wide && Math.abs(x - x0) <= EDGE ? "l" : wide && Math.abs(x - x1) <= EDGE ? "r" : null };
+    }
+    return null;
+  }
   const B = boxes();
   if (y >= tl.clipY + tl.clipH - 26 && y <= tl.clipY + tl.clipH - 4) {
     for (const b of B) if (b.it.kind === "clip" && b.it.inT && B[B.indexOf(b) - 1].it.kind === "clip" && Math.abs(x - joinX(b)) <= 10) return { join: b.i };
@@ -785,7 +944,14 @@ tl.cv.addEventListener("pointerdown", e => {
   if (!V.clips.length || V.exporting || e.button !== 0) return;
   const x = e.offsetX, y = e.offsetY, h = hit(x, y);
   tl.cv.setPointerCapture(e.pointerId);
-  if (h && h.join != null) {
+  V.selCap = h && h.cap ? h.cap.cap.id : null;
+  if (h && h.cap) {
+    V.sel = -1; V.selJoin = -1;
+    const cap = h.cap.cap;
+    tl.drag = { kind: "cap", cap, edge: h.edge, x0: x, orig: { s: cap.s, e: cap.e }, pps: pps() };
+    showTab("caps"); renderCapList(); focusCapRow(cap.id, false);
+    if (!h.edge) vSeek(h.cap.t0 + 0.01); else vPause();
+  } else if (h && h.join != null) {
     V.selJoin = h.join; V.sel = -1;
     showTab("trans"); tl.drag = null;
   } else if (h && h.edge) {
@@ -812,6 +978,17 @@ tl.cv.addEventListener("pointermove", e => {
     return;
   }
   if (d.kind === "scrub") { vSeek(tOf(x)); return; }
+  if (d.kind === "cap") {
+    // captions move in their video's own time, staying inside it
+    const c = d.cap, src = c.src, dt = (x - d.x0) / pps(), MIN = 0.3;
+    if (d.edge === "l") c.s = clamp(d.orig.s + dt, src.start, c.e - MIN);
+    else if (d.edge === "r") c.e = clamp(d.orig.e + dt, c.s + MIN, src.end);
+    else { const sh = clamp(dt, src.start - d.orig.s, src.end - d.orig.e); c.s = d.orig.s + sh; c.e = d.orig.e + sh; }
+    d.moved = d.moved || Math.abs(x - d.x0) > 2;
+    V.version++;
+    vtick();
+    return;
+  }
   if (d.kind === "move") {
     d.x = x;
     if (!d.moved && Math.abs(x - d.x0) > 5) { d.moved = true; vPause(); tl.cv.style.cursor = "grabbing"; }
@@ -832,6 +1009,11 @@ function endDrag() {
   if (!d) return;
   tl.cv.style.cursor = "";
   sizeTimeline();
+  if (d.kind === "cap") {
+    if (d.moved) { renderCapList(); focusCapRow(d.cap.id, false); vStatus("Caption timing changed."); }
+    updateUi();
+    return;
+  }
   if (d.kind === "move" && d.moved) {
     const to = insertAt(d);
     if (to !== d.i && to !== d.i + 1) {
@@ -970,7 +1152,8 @@ async function vExport() {
     const sr = audio().sampleRate;
     const acfg = { codec: "mp4a.40.2", sampleRate: sr, numberOfChannels: 2, bitrate: 192000 };
     if (!(await AudioEncoder.isConfigSupported(acfg).then(r => r.supported, () => false))) throw new Error("this browser can't make AAC sound. Try Chrome or Edge");
-    if (V.title.on) await Promise.all(["700 40px Figtree", "500 20px Figtree"].map(f => document.fonts.load(f).catch(() => {})));
+    const burn = V.capLook.burn && capsOnTimeline(P).length > 0;
+    if (V.title.on || burn) await Promise.all(["700 40px Figtree", "500 20px Figtree", "600 20px Figtree", "800 40px Figtree"].map(f => document.fonts.load(f).catch(() => {})));
 
     const target = writable ? new Mp4Muxer.FileSystemWritableFileStreamTarget(writable) : new Mp4Muxer.ArrayBufferTarget();
     const muxer = new Mp4Muxer.Muxer({ target, video: { codec: "avc", width: W, height: H, frameRate: fps }, audio: { codec: "aac", numberOfChannels: 2, sampleRate: sr },
@@ -994,6 +1177,7 @@ async function vExport() {
     for (let k = 0; k < frames; k++) {
       if (V.cancel) throw new Error("cancelled");
       const t = k / fps + 0.0005, st = layersAt(P, t), imgs = new Map();
+      if (burn) { st.cap = capAt(P, t); st.t = t; }
       for (const [it, r] of readers) if (it.end <= t) { r.close(); readers.delete(it); }
       for (const L of st.layers) {
         if (L.it.kind !== "clip") continue;
@@ -1080,6 +1264,207 @@ async function addMusic(file) {
   settingsChanged();
 }
 
+/* ---------- Captions panel ---------- */
+function capsChanged() { V.version++; renderCapList(); vtick(); updateUi(); }
+// The list shows captions in the order they play in the edited video.
+function renderCapList() {
+  const box = $("#vCapList"), P = vplan(), seen = new Set(), rows = [];
+  for (const x of capsOnTimeline(P)) { if (!seen.has(x.cap.id)) { seen.add(x.cap.id); rows.push(x); } }
+  const focusedId = document.activeElement && document.activeElement.closest(".vcap") ? document.activeElement.closest(".vcap").dataset.id : null;
+  box.replaceChildren(...rows.map(x => {
+    const row = document.createElement("li");
+    row.className = "vcap"; row.dataset.id = x.cap.id;
+    row.classList.toggle("sel", x.cap.id === V.selCap);
+    const time = document.createElement("button");
+    time.type = "button"; time.className = "vcap-time mono"; time.textContent = fmt(x.t0, 1);
+    time.title = "Jump here"; time.setAttribute("aria-label", `Jump to ${fmt(x.t0, 1)}`);
+    time.addEventListener("click", () => { V.selCap = x.cap.id; V.sel = -1; V.selJoin = -1; vSeek(x.t0 + 0.01); markSelectedRow(); });
+    const text = document.createElement("textarea");
+    text.rows = 2; text.value = x.cap.text; text.setAttribute("aria-label", `Caption at ${fmt(x.t0, 1)}`);
+    text.addEventListener("focus", () => { V.selCap = x.cap.id; markSelectedRow(); if (!V.playing) vSeek(x.t0 + 0.01); });
+    text.addEventListener("input", () => { x.cap.text = text.value; V.version++; vtick(); });
+    const del = document.createElement("button");
+    del.type = "button"; del.className = "icon-btn"; del.setAttribute("aria-label", `Delete caption at ${fmt(x.t0, 1)}`);
+    del.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    del.addEventListener("click", () => deleteCaption(x.cap.id));
+    row.append(time, text, del);
+    return row;
+  }));
+  $("#vCapEmpty").hidden = rows.length > 0;
+  $("#vCapCount").textContent = rows.length ? `${rows.length} caption${rows.length > 1 ? "s" : ""}` : "";
+  if (focusedId) { const r = box.querySelector(`.vcap[data-id="${focusedId}"] textarea`); if (r) r.focus({ preventScroll: true }); }
+}
+function markSelectedRow() { document.querySelectorAll("#vCapList .vcap").forEach(r => r.classList.toggle("sel", r.dataset.id == V.selCap)); }
+function focusCapRow(id, focusText = true) {
+  const row = $(`#vCapList .vcap[data-id="${id}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: "nearest" });
+  if (focusText) row.querySelector("textarea").focus({ preventScroll: true });
+}
+let lastActiveCap = null;
+function markActiveCap(x) {
+  const id = x ? x.cap.id : null;
+  if (id === lastActiveCap) return;
+  lastActiveCap = id;
+  document.querySelectorAll("#vCapList .vcap").forEach(r => r.classList.toggle("now", r.dataset.id == id));
+  if (id && V.playing) { const row = $(`#vCapList .vcap[data-id="${id}"]`); if (row && !row.contains(document.activeElement)) row.scrollIntoView({ block: "nearest" }); }
+}
+function addCaptionAtPlayhead() {
+  if (!V.clips.length || V.exporting) return;
+  const L = locate(V.T), c = V.clips[L.i];
+  if (!c) { vStatus("Move the playhead onto a clip to add a caption there."); return; }
+  const s = L.s, next = V.caps.filter(k => k.src === c.src && k.s > s).reduce((m, k) => Math.min(m, k.s), Infinity);
+  const e = Math.min(s + 2.5, c.out, next);
+  if (e - s < 0.3) { vStatus("There's already a caption right here. Click it in the timeline to edit it."); return; }
+  const cap = { id: V.nextId++, src: c.src, s, e, text: "" };
+  V.caps.push(cap); V.selCap = cap.id; V.sel = -1; V.selJoin = -1;
+  showTab("caps"); capsChanged();
+  focusCapRow(cap.id);
+}
+function deleteCaption(id) {
+  const i = V.caps.findIndex(k => k.id === id);
+  if (i < 0) return;
+  const [cap] = V.caps.splice(i, 1);
+  if (V.selCap === id) V.selCap = null;
+  capsChanged();
+  toast("Caption deleted.", () => { V.caps.splice(Math.min(i, V.caps.length), 0, cap); capsChanged(); });
+}
+async function importSubs(file) {
+  if (!file) return;
+  const cues = parseSubs(await file.text());
+  if (!cues.length) { vStatus(`${file.name} has no captions Hookd can read. Use an .srt or .vtt file.`, true); return; }
+  const added = [];
+  for (const q of cues) {
+    const L = locate(q.t0 + 0.001), c = V.clips[L.i];
+    if (!c || q.t0 >= vtotal()) continue;
+    added.push({ id: V.nextId++, src: c.src, s: L.s, e: Math.min(c.out, L.s + (q.t1 - q.t0)), text: q.text });
+  }
+  V.caps.push(...added);
+  showTab("caps"); capsChanged();
+  vStatus(`Added ${added.length} caption${added.length === 1 ? "" : "s"} from ${file.name}.`);
+}
+async function saveSrt() {
+  const srt = captionsSrt(vplan());
+  if (!srt) { vStatus("There are no captions to save yet."); return; }
+  await saveFile(new Blob([srt], { type: "application/x-subrip" }), exportName() + ".srt");
+}
+
+/* ---------- Automatic captions ---------- */
+// The sound the edit uses, as pieces under 30 s (Whisper's window), split at quiet moments.
+async function speechPieces() {
+  const bySrc = new Map();
+  for (const c of V.clips) {
+    if (!c.src.audio) continue;
+    if (!bySrc.has(c.src)) bySrc.set(c.src, []);
+    bySrc.get(c.src).push([c.in, c.out]);
+  }
+  const pieces = [];
+  for (const [src, rs] of bySrc) {
+    rs.sort((a, b) => a[0] - b[0]);
+    const merged = [];
+    for (const r of rs) { const m = merged.at(-1); if (m && r[0] <= m[1] + 0.5) m[1] = Math.max(m[1], r[1]); else merged.push([...r]); }
+    for (const [a, b] of merged) {
+      let t = a;
+      while (b - t > 0.5) {
+        let end = b;
+        if (b - t > 28) {   // cut at the quietest moment between 20 and 28 s in
+          let best = t + 28, low = Infinity;
+          for (let u = t + 20; u < t + 28; u += 0.02) {
+            const lv = src.levels[Math.floor((u - src.aOff) * LEVELS_PER_SEC)] ?? 1;
+            if (lv < low) { low = lv; best = u; }
+          }
+          end = best;
+        }
+        // skip stretches with nobody talking; Whisper tends to invent words for silence
+        let loud = false;
+        for (let u = t; u < end && !loud; u += 0.02) if ((src.levels[Math.floor((u - src.aOff) * LEVELS_PER_SEC)] || 0) > src.voiceThr) loud = true;
+        if (loud) pieces.push({ src, t0: t, t1: end });
+        t = end;
+      }
+    }
+  }
+  for (const p of pieces) p.audio = await to16k(p.src, p.t0, p.t1);
+  return pieces;
+}
+async function to16k(src, t0, t1) {
+  const buf = src.audio, sr = buf.sampleRate;
+  const a = clamp(Math.round((t0 - src.aOff) * sr), 0, buf.length), b = clamp(Math.round((t1 - src.aOff) * sr), a + 1, buf.length);
+  const part = new AudioBuffer({ length: b - a, numberOfChannels: buf.numberOfChannels, sampleRate: sr });
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) part.copyToChannel(buf.getChannelData(ch).subarray(a, b), ch);
+  const off = new OfflineAudioContext(1, Math.ceil((b - a) / sr * 16000), 16000);
+  const s = off.createBufferSource(); s.buffer = part; s.connect(off.destination); s.start();
+  return (await off.startRendering()).getChannelData(0);
+}
+let capWorker = null, capJob = null;
+async function autoCaptions() {
+  if (capJob) { cancelAutoCaptions(); return; }
+  if (!V.clips.length || V.exporting) return;
+  if (!V.clips.some(c => c.src.audio)) { vStatus("None of these videos has sound to make captions from.", true); return; }
+  const model = $("#vCapModel").value, language = $("#vCapLang").value;
+  vPause();
+  const job = capJob = { found: [], cancelled: false };
+  updateUi();
+  const prog = $("#vCapProg"), note = $("#vCapNote");
+  prog.hidden = false; prog.removeAttribute("value"); note.textContent = "Getting the sound ready…";
+  try {
+    const pieces = await speechPieces();
+    if (job.cancelled) return;
+    if (!pieces.length) { vStatus("Couldn't hear anyone talking in these clips."); return; }
+    if (!capWorker) capWorker = new Worker("captions-worker.js", { type: "module" });
+    const total = pieces.reduce((a, p) => a + p.t1 - p.t0, 0);
+    await new Promise((resolve, reject) => {
+      job.stop = resolve;
+      let done = 0;
+      capWorker.onmessage = e => {
+        const d = e.data;
+        if (job.cancelled) return;
+        if (d.type === "download") {
+          prog.value = d.loaded / d.total;
+          note.textContent = `Downloading the speech model (once)… ${Math.round(d.loaded / 1e6)} of ${Math.round(d.total / 1e6)} MB`;
+        } else if (d.type === "ready") {
+          prog.value = 0; note.textContent = "Listening…";
+        } else if (d.type === "piece") {
+          const p = pieces[d.index];
+          for (const ch of d.chunks) {
+            const s = p.t0 + Math.max(0, ch.s ?? 0), e = Math.min(p.t1, p.t0 + (ch.e ?? (p.t1 - p.t0)));
+            for (const part of splitCaption(s, Math.max(e, s + 0.4), ch.text)) job.found.push({ id: V.nextId++, src: p.src, ...part });
+          }
+          done += p.t1 - p.t0;
+          prog.value = done / total;
+          note.textContent = `Listening… ${Math.round(done / total * 100)}%`;
+        } else if (d.type === "done") resolve();
+        else if (d.type === "error") reject(new Error(d.message));
+      };
+      capWorker.onerror = () => reject(new Error("the speech tools stopped unexpectedly"));
+      capWorker.postMessage({ type: "run", model, device: "wasm", language, pieces: pieces.map((p, id) => ({ id, audio: p.audio })) },
+        pieces.map(p => p.audio.buffer));
+    });
+    if (job.cancelled) return;
+    // new captions replace the old ones for the parts that were listened to
+    const covered = (src, s, e) => pieces.some(p => p.src === src && s < p.t1 && e > p.t0);
+    V.caps = V.caps.filter(k => !covered(k.src, k.s, k.e)).concat(job.found);
+    showTab("caps"); capsChanged();
+    vStatus(job.found.length ? `Made ${job.found.length} captions. Read them through and fix any words it got wrong.` : "Didn't catch any words. Try another language setting.");
+  } catch (e) {
+    if (!job.cancelled) vStatus("Couldn't make captions: " + ((e && e.message) || e), true);
+    if (capWorker) { capWorker.terminate(); capWorker = null; }
+  } finally {
+    if (capJob === job) capJob = null;
+    prog.hidden = true; note.textContent = "";
+    updateUi();
+  }
+}
+function cancelAutoCaptions() {
+  if (!capJob) return;
+  capJob.cancelled = true;
+  if (capJob.stop) capJob.stop();
+  capJob = null;
+  if (capWorker) { capWorker.terminate(); capWorker = null; }
+  $("#vCapProg").hidden = true; $("#vCapNote").textContent = "";
+  vStatus("Stopped making captions.");
+  updateUi();
+}
+
 /* ---------- UI ---------- */
 function vStatus(msg, err) { const s = $("#vStatus"); s.textContent = msg; s.classList.toggle("err", !!err); }
 function showTab(name) {
@@ -1123,6 +1508,19 @@ function updateUi() {
   $("#vShapeOut").textContent = has ? `Exports at ${W}×${H}.` : "";
   if (!busy) $("#vNote").textContent = has ? `Exports an MP4 at ${W}×${H}.` : "Exports at your video's own size, up to 1080p.";
   ["#vTitleText", "#vTitleSub", "#vTitleDur"].forEach(s => ($(s).disabled = !V.title.on));
+  // captions
+  const hasCaps = capsOnTimeline(vplan()).length > 0;
+  $("#vCapAuto").disabled = (!has || busy) && !capJob;
+  $("#vCapAuto").textContent = capJob ? "Stop" : hasCaps ? "Make captions again" : "Make captions automatically";
+  $("#vCapAuto").classList.toggle("primary", !capJob && !hasCaps && has);
+  $("#vCapAdd").disabled = !has || busy;
+  $("#vCapImport").disabled = !has || busy;
+  $("#vCapSrt").disabled = !hasCaps;
+  ["#vCapLang", "#vCapModel"].forEach(s => ($(s).disabled = !!capJob));
+  document.querySelectorAll("#vCapStyle [data-style]").forEach(b => b.setAttribute("aria-pressed", b.dataset.style === V.capLook.style));
+  document.querySelectorAll("#vCapSize [data-size]").forEach(b => b.setAttribute("aria-pressed", b.dataset.size === V.capLook.size));
+  document.querySelectorAll("#vCapPos [data-pos]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pos === V.capLook.pos));
+  $("#vCapBurn").checked = V.capLook.burn;
 }
 let vRaf = 0;
 function vLoop() {
@@ -1179,6 +1577,17 @@ $("#vTitleDur").addEventListener("change", e => { V.title.dur = +e.target.value;
 // shape
 $("#vShapes").addEventListener("click", e => { const b = e.target.closest("[data-shape]"); if (b) { V.shape = b.dataset.shape; settingsChanged(); } });
 $("#vFitSeg").addEventListener("click", e => { const b = e.target.closest("[data-fit]"); if (b) { V.fit = b.dataset.fit; settingsChanged(); } });
+// captions
+$("#vCapAuto").addEventListener("click", autoCaptions);
+$("#vCapAdd").addEventListener("click", addCaptionAtPlayhead);
+$("#vCapImport").addEventListener("click", () => $("#vCapIn").click());
+$("#vCapIn").addEventListener("change", e => { importSubs(e.target.files[0]); e.target.value = ""; });
+$("#vCapSrt").addEventListener("click", saveSrt);
+$("#vCapBurn").addEventListener("change", e => { V.capLook.burn = e.target.checked; updateUi(); });
+[["#vCapStyle", "style"], ["#vCapSize", "size"], ["#vCapPos", "pos"]].forEach(([sel, key]) => $(sel).addEventListener("click", e => {
+  const b = e.target.closest(`[data-${key}]`); if (!b) return;
+  V.capLook[key] = b.dataset[key]; vtick(); updateUi();
+}));
 // backup for when the page isn't drawing (another tab in front): still honour the cuts
 els.forEach(el => el.addEventListener("timeupdate", () => { if (V.playing && document.hidden) vtick(); }));
 els.forEach(el => el.addEventListener("error", () => {
@@ -1198,7 +1607,8 @@ document.addEventListener("keydown", e => {
   if (mod) return;
   if (k === " " && !e.target.closest("button")) { e.preventDefault(); vToggle(); }
   else if (k === "s" || k === "S") { e.preventDefault(); splitAtPlayhead(); }
-  else if (k === "Delete" || k === "Backspace") { e.preventDefault(); deleteSelected(); }
+  else if (k === "Delete" || k === "Backspace") { e.preventDefault(); if (V.selCap != null) deleteCaption(V.selCap); else deleteSelected(); }
+  else if (k === "c" || k === "C") { e.preventDefault(); addCaptionAtPlayhead(); }
   else if (k === "ArrowLeft") { e.preventDefault(); e.shiftKey ? vSeek(V.T - 1) : stepFrames(-1); }
   else if (k === "ArrowRight") { e.preventDefault(); e.shiftKey ? vSeek(V.T + 1) : stepFrames(1); }
   else if (k === "Home") { e.preventDefault(); vSeek(0); }
