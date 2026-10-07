@@ -212,6 +212,13 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .pad.queued::after { content: "Up next"; position: absolute; top: 14px; right: 14px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .pad:disabled { opacity: .45; cursor: not-allowed; }
 .hint { color: var(--muted); font-size: 13px; margin-top: 14px; }
+
+/* Video (coming soon) */
+.soon { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 26px 22px; max-width: 640px; }
+.soon .tag { display: inline-block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+.soon h2 { font: 400 1.6rem/1.2 var(--display); margin: 6px 0 8px; }
+.soon p { margin: 0 0 10px; color: var(--muted); text-wrap: pretty; }
+.soon ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 .foot { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .foot p { margin: 4px 0; }
 .foot a { color: inherit; text-underline-offset: 2px; }
@@ -305,8 +312,9 @@ img { max-width: 100%; }
     <div class="seg" role="group" aria-label="Mode">
       <button type="button" id="modeBuild" aria-pressed="true">Build a mashup</button>
       <button type="button" id="modeLive" aria-pressed="false">Live DJ</button>
+      <button type="button" id="modeVideo" aria-pressed="false">Edit a video</button>
     </div>
-    <div class="vibe">
+    <div class="vibe" id="vibeBar">
       <span class="label">Vibe</span>
       <div class="seg" role="group" aria-label="Vibe" id="vibeSeg">
         <button type="button" data-vibe="original" aria-pressed="true">Original</button>
@@ -448,6 +456,22 @@ img { max-width: 100%; }
     </div>
     <div class="pads" id="pads"></div>
     <p class="hint" id="liveHint">Tap a pad to start. Tap another to jump to it with your transition.<span class="kbd-only"> Press <kbd>1</kbd>–<kbd>9</kbd> to fire pads and <kbd>Space</kbd> to stop.</span></p>
+  </section>
+
+  <!-- VIDEO -->
+  <section id="videoView" hidden>
+    <div class="soon">
+      <span class="tag">Coming soon</span>
+      <h2>Edit your videos, the easy way</h2>
+      <p>Made for creators putting lessons and short videos on LinkedIn, Reels and YouTube. You'll be able to:</p>
+      <ul>
+        <li>Cut out mistakes and join clips, with sound and picture always in sync</li>
+        <li>Smooth transitions between cuts</li>
+        <li>Add a little background music that can dip while you talk</li>
+        <li>Make captions automatically or type your own, and style them</li>
+        <li>Export a high-quality MP4 in the shape you need</li>
+      </ul>
+    </div>
   </section>
 
   <footer class="foot">

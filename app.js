@@ -1645,15 +1645,20 @@ function setMode(m) {
   state.mode = m;
   $("#modeBuild").setAttribute("aria-pressed", m === "build");
   $("#modeLive").setAttribute("aria-pressed", m === "live");
+  $("#modeVideo").setAttribute("aria-pressed", m === "video");
   $("#buildView").hidden = m !== "build";
   $("#liveView").hidden = m !== "live";
+  $("#videoView").hidden = m !== "video";
+  $("#vibeBar").hidden = m === "video";
   if (m === "build" && playing && playing.kind === "live") stopAll();
   if (m === "live" && playing && playing.kind !== "live") stopAll();
+  if (m === "video" && playing) stopAll();
   if (m === "build") requestAnimationFrame(() => state.tracks.forEach(drawWave));
   updateMbar();
 }
 $("#modeBuild").addEventListener("click", () => setMode("build"));
 $("#modeLive").addEventListener("click", () => setMode("live"));
+$("#modeVideo").addEventListener("click", () => setMode("video"));
 
 const VIBE_SLIDE = 0.8;   // seconds a live vibe change glides, like a turntable speeding up or slowing down
 function showVibe() {
@@ -1685,7 +1690,7 @@ const drop = $("#drop");
 $("#fileIn").addEventListener("change", e => { addFiles(e.target.files); e.target.value = ""; });
 ["dragenter", "dragover"].forEach(ev => document.addEventListener(ev, e => { if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) { e.preventDefault(); drop.classList.add("over"); } }));
 ["dragleave", "drop"].forEach(ev => document.addEventListener(ev, e => { if (ev === "dragleave" && e.relatedTarget) return; drop.classList.remove("over"); }));
-document.addEventListener("drop", e => { if (e.dataTransfer && e.dataTransfer.files.length) { e.preventDefault(); if (state.mode !== "build") setMode("build"); addFiles(e.dataTransfer.files); } });
+document.addEventListener("drop", e => { if (e.dataTransfer && e.dataTransfer.files.length) { e.preventDefault(); if (state.mode === "video") { toast("Video editing is coming soon."); return; } if (state.mode !== "build") setMode("build"); addFiles(e.dataTransfer.files); } });
 
 $("#xf").addEventListener("input", e => { state.xf = +e.target.value; $("#xfOut").textContent = state.xf.toFixed(1) + " s"; refreshMixPanel(); });
 $("#fo").addEventListener("input", e => { state.fadeOut = +e.target.value; $("#foOut").textContent = state.fadeOut.toFixed(1) + " s"; refreshMixPanel(); });
