@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Hookd: find the hook, drop the mashup</title>
-<meta name="description" content="Make song mashups right in your browser. Drop in your songs, let Hookd find the hooks, blend them with DJ transitions, play live, and download MP3 or a video for Reels. Nothing is uploaded.">
+<meta name="description" content="Make song mashups right in your browser. Drop in your songs, let Hookd find the hooks, blend them with DJ transitions, play live, and download MP3 or a video for Reels.">
 <meta name="theme-color" content="#FBF6F3" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#16111B" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Hookd: find the hook, drop the mashup">
-<meta property="og:description" content="Make song mashups right in your browser. DJ transitions, live pads, MP3 and Reels video export. Your songs never leave your device.">
+<meta property="og:description" content="Make song mashups right in your browser. DJ transitions, live pads, MP3 and Reels video export.">
 <meta property="og:url" content="https://hookd-sage.vercel.app/">
 <meta property="og:image" content="https://hookd-sage.vercel.app/og.png">
 <meta property="og:image:width" content="1200">
@@ -17,7 +17,7 @@
 <meta property="og:image:alt" content="Hookd logo and tagline above a waveform with the hook section highlighted in pink">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://hookd-sage.vercel.app/og.png">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2316111B'/%3E%3Cpath d='M20 14v36M20 34c0-7 5-11 11-11s11 4 11 11v16' stroke='%23FF5C9A' stroke-width='7' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -36,6 +36,8 @@
   --accent: #C2185B;
   --accent-ink: #FFFFFF;
   --gold: #D98A00;
+  --hindi: #B26F00;
+  --slowed: #5E35B1; --slowed-ink: #FFFFFF; --sped: #E65100; --sped-ink: #FFFFFF;
   --wave: #C9BAC6;
   --focus: #5E35B1;
   --ok: #2E7D4F;
@@ -50,7 +52,8 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
     --bg: #16111B; --surface: #211A29; --sunk: #1B1522; --ink: #F2EAF1; --muted: #A999AC;
-    --line: #362C40; --accent: #FF5C9A; --accent-ink: #1A0A12; --gold: #FFC24A; --wave: #54475E;
+    --line: #362C40; --accent: #FF5C9A; --accent-ink: #1A0A12; --gold: #FFC24A; --hindi: #FFC24A; --wave: #54475E;
+    --slowed: #A58BFF; --slowed-ink: #160E2A; --sped: #FFC24A; --sped-ink: #1F1400;
     --focus: #B9A4FF; --ok: #6FD39A; --err: #FF8A80;
     --t1: #FF5C9A; --t2: #FFC24A; --t3: #3FD0BD; --t4: #A58BFF; --t5: #FF8A5C; --t6: #7CD67F;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
@@ -59,7 +62,8 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #16111B; --surface: #211A29; --sunk: #1B1522; --ink: #F2EAF1; --muted: #A999AC;
-  --line: #362C40; --accent: #FF5C9A; --accent-ink: #1A0A12; --gold: #FFC24A; --wave: #54475E;
+  --line: #362C40; --accent: #FF5C9A; --accent-ink: #1A0A12; --gold: #FFC24A; --hindi: #FFC24A; --wave: #54475E;
+  --slowed: #A58BFF; --slowed-ink: #160E2A; --sped: #FFC24A; --sped-ink: #1F1400;
   --focus: #B9A4FF; --ok: #6FD39A; --err: #FF8A80;
   --t1: #FF5C9A; --t2: #FFC24A; --t3: #3FD0BD; --t4: #A58BFF; --t5: #FF8A5C; --t6: #7CD67F;
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
@@ -75,17 +79,21 @@ button, input, select { font: inherit; color: inherit; }
 
 /* Masthead */
 .masthead { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 32px; margin-bottom: 22px; }
-.masthead h1 { font: 400 clamp(2.4rem, 6vw, 3.6rem)/1 var(--display); margin: 0; letter-spacing: .01em; }
-.masthead h1 span { color: var(--accent); }
+.masthead h1 { display: flex; align-items: center; gap: .3em; font: 400 clamp(2.4rem, 6vw, 3.6rem)/1 var(--display); margin: 0; letter-spacing: .01em; }
+.masthead h1 .mark { width: 1.15em; height: 1.15em; flex: none; }
+.masthead h1 .d { color: var(--accent); }
+.masthead h1 .hi { font-size: .45em; color: var(--hindi); align-self: center; padding-top: .3em; letter-spacing: 0; }
 .masthead p { margin: 6px 0 0; color: var(--muted); max-width: 52ch; text-wrap: pretty; }
-.private { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
-.private svg { flex: none; color: var(--ok); }
 
 /* Bar */
 .bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-block: 12px; border-block: 1px solid var(--line); margin-bottom: 22px; }
 .seg { display: inline-flex; background: var(--sunk); border-radius: 999px; padding: 3px; gap: 2px; flex-wrap: wrap; }
 .seg button { border: 0; background: transparent; padding: 7px 14px; border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 14px; color: var(--muted); }
 .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.seg button[data-vibe="slowed"][aria-pressed="true"] { background: var(--slowed); color: var(--slowed-ink); }
+.seg button[data-vibe="sped"][aria-pressed="true"] { background: var(--sped); color: var(--sped-ink); }
+.live-top .live-vibe { min-width: 0; flex-basis: 100%; }
+.live-vibe .seg { justify-self: start; }
 .bar .vibe { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
 
@@ -288,12 +296,8 @@ img { max-width: 100%; }
 <div class="wrap">
   <header class="masthead">
     <div>
-      <h1>Hook<span>d</span></h1>
+      <h1><img class="mark" src="favicon.svg" alt=""><span>Hook<span class="d">d</span></span><span class="hi" lang="hi">हुक्ड</span></h1>
       <p>Find the hook, drop the mashup. Add your songs, keep the best part of each, and blend them into one track. You can also play it live like a DJ.</p>
-    </div>
-    <div class="private">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-      Your songs stay on your device. Nothing is uploaded.
     </div>
   </header>
 
@@ -410,6 +414,14 @@ img { max-width: 100%; }
   <!-- LIVE -->
   <section id="liveView" hidden>
     <div class="live-top">
+      <div class="field live-vibe">
+        <span class="label" id="liveVibeLbl">Vibe</span>
+        <div class="seg" role="group" aria-labelledby="liveVibeLbl" id="liveVibeSeg" title="Switching mid-set slides the music like a turntable">
+          <button type="button" data-vibe="original" aria-pressed="true">Original</button>
+          <button type="button" data-vibe="slowed" aria-pressed="false">Slowed + reverb</button>
+          <button type="button" data-vibe="sped" aria-pressed="false">Sped up</button>
+        </div>
+      </div>
       <div class="field">
         <label for="liveStyle">Transition when you switch</label>
         <select id="liveStyle">
@@ -439,7 +451,7 @@ img { max-width: 100%; }
   </section>
 
   <footer class="foot">
-    <p>Only mash up music you have the right to use. Hookd doesn't host, upload or provide any songs.</p>
+    <p>Only mash up music you have the right to use. Hookd doesn't host or provide any songs.</p>
     <p>&copy; 2026 Hookd &middot; <a href="legal">Privacy, terms &amp; copyright</a> &middot; <a href="https://github.com/AdityaDoped/hookD" rel="noopener">Source on GitHub</a></p>
   </footer>
 </div>

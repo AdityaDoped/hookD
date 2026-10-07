@@ -146,7 +146,7 @@ function applySettings(s) {
   $("#liveStyle").value = state.liveStyle; $("#liveLen").value = state.liveLen; $("#liveLenOut").textContent = state.liveLen.toFixed(1) + " s";
   $("#quant").checked = state.quant; $("#auto").checked = state.auto;
   setSync(state.sync);
-  document.querySelectorAll("#vibeSeg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.vibe === state.vibe));
+  showVibe();
   if (s.mixName) $("#mixName").value = s.mixName;
   if (s.vidShape) $("#vidShape").value = s.vidShape;
   if (s.vidLen) $("#vidLen").value = s.vidLen;
@@ -1655,24 +1655,31 @@ function setMode(m) {
 $("#modeBuild").addEventListener("click", () => setMode("build"));
 $("#modeLive").addEventListener("click", () => setMode("live"));
 
-$("#vibeSeg").addEventListener("click", e => {
-  const b = e.target.closest("[data-vibe]"); if (!b) return;
-  state.vibe = b.dataset.vibe;
-  document.querySelectorAll("#vibeSeg button").forEach(x => x.setAttribute("aria-pressed", x === b));
-  const vibe = VIBES[state.vibe];
-  if (liveBus && actx) liveBus.wetGain.gain.setTargetAtTime(vibe.wet, actx.currentTime, 0.1);
-  // re-base the live voice so its position math and auto-advance stay right
+const VIBE_SLIDE = 0.8;   // seconds a live vibe change glides, like a turntable speeding up or slowing down
+function showVibe() {
+  document.querySelectorAll("#vibeSeg button, #liveVibeSeg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.vibe === state.vibe));
+}
+function setVibe(name) {
+  if (!VIBES[name] || name === state.vibe) return;
+  state.vibe = name; showVibe(); persist();
+  const vibe = VIBES[name];
+  if (liveBus && actx) liveBus.wetGain.gain.setTargetAtTime(vibe.wet, actx.currentTime, VIBE_SLIDE / 3);
+  // re-base the live voice and glide from its current speed; the ramp keeps position math and auto-advance right
   const v = live.voice;
   if (v && actx) {
-    const now = actx.currentTime;
-    v.offset = voicePos(v, now); v.startT = now; v.rate = vibe.rate; v.ramp = null;
-    v.src.playbackRate.cancelScheduledValues(now);
-    v.src.playbackRate.setValueAtTime(vibe.rate, now);
+    const now = actx.currentTime, pos = voicePos(v, now);
+    const cur = (voicePos(v, now + 0.01) - pos) / 0.01;
+    const pr = v.src.playbackRate;
+    holdAt(pr, now); pr.setValueAtTime(cur, now); pr.linearRampToValueAtTime(vibe.rate, now + VIBE_SLIDE);
+    Object.assign(v, { offset: pos, startT: now, rate: vibe.rate, ramp: { L: 0, R: VIBE_SLIDE, r: cur / vibe.rate } });
     scheduleAdvance();
   }
   if (playing && playing.kind === "cut") stopAll();
   refreshMixPanel();
-});
+}
+["#vibeSeg", "#liveVibeSeg"].forEach(s => $(s).addEventListener("click", e => {
+  const b = e.target.closest("[data-vibe]"); if (b) setVibe(b.dataset.vibe);
+}));
 
 const drop = $("#drop");
 $("#fileIn").addEventListener("change", e => { addFiles(e.target.files); e.target.value = ""; });
