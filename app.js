@@ -168,7 +168,7 @@ async function restoreInner() {
       await tick();
       try {
         const file = await store.getFile(t.id);
-        const buffer = await c.decodeAudioData(await file.arrayBuffer());
+        const buffer = await decodeFile(c, file);
         state.tracks.push({ ...t, buffer, duration: buffer.duration, peaks: computePeaks(buffer),
           energy: energyEnv(buffer), beat: t.beat || detectBeats(buffer) });
       } catch (e) { failed++; }
@@ -597,6 +597,135 @@ async function renderMix() {
   return buf;
 }
 
+/* ---------- Decoding ---------- */
+// Browsers reject a whole MP4/MOV when its first sound track is in a format
+// they can't play, like the Spatial Audio track newer iPhones put first.
+// Those videos usually carry a plain AAC track too, so when the direct
+// decode fails we find that track, repackage it as an .m4a with mp4-muxer
+// and decode that instead. It all happens on the device.
+const CODEC_NAMES = { apac: "Apple Spatial Audio", "ac-3": "Dolby Digital", "ec-3": "Dolby Digital Plus", "ac-4": "Dolby AC-4", alac: "Apple Lossless" };
+
+async function decodeFile(c, file) {
+  try { return await c.decodeAudioData(await file.arrayBuffer()); }
+  catch (e) {
+    let bytes, tracks = null;
+    try { bytes = new Uint8Array(await file.arrayBuffer()); tracks = mp4SoundTracks(bytes); } catch (_) {}
+    if (!tracks || typeof Mp4Muxer === "undefined") throw e;   // not an MP4/MOV we can read
+    const aac = tracks.find(t => t.codec === "mp4a" && t.asc && t.samples.length);
+    if (!aac) {
+      const names = [...new Set(tracks.map(t => CODEC_NAMES[t.codec] || t.codec.toUpperCase()))];
+      const err = new Error("no playable sound track");
+      err.why = names.length ? `its sound is in ${names.join(" and ")} format, which browsers can't open` : "it has no sound";
+      throw err;
+    }
+    return await c.decodeAudioData(remuxAac(bytes, aac));
+  }
+}
+
+// The sound tracks of an MP4/MOV: codec, AAC config and sample table.
+// Returns null when the bytes aren't an MP4/MOV file.
+function mp4SoundTracks(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const fourcc = o => String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]);
+  const kids = (s, e) => {   // child boxes of the range [s, e), with s/e marking each payload
+    const out = [];
+    while (s + 8 <= e) {
+      let size = dv.getUint32(s), h = 8;
+      if (size === 1) { size = Number(dv.getBigUint64(s + 8)); h = 16; }
+      else if (size === 0) size = e - s;
+      if (size < h || s + size > e) break;
+      out.push({ type: fourcc(s + 4), s: s + h, e: s + size });
+      s += size;
+    }
+    return out;
+  };
+  const child = (box, ...path) => { for (const t of path) box = box && kids(box.s, box.e).find(k => k.type === t); return box; };
+  const moov = kids(0, b.length).find(k => k.type === "moov");
+  if (!moov) return null;
+  const tracks = [];
+  for (const trak of kids(moov.s, moov.e).filter(k => k.type === "trak")) {
+    const hdlr = child(trak, "mdia", "hdlr"), mdhd = child(trak, "mdia", "mdhd"), stbl = child(trak, "mdia", "minf", "stbl");
+    if (!hdlr || !mdhd || !stbl || fourcc(hdlr.s + 8) !== "soun") continue;
+    const stsd = child(stbl, "stsd"), entry = stsd && kids(stsd.s + 8, stsd.e)[0];
+    if (!entry) continue;
+    const t = { codec: entry.type.trim().toLowerCase(), scale: dv.getUint32(mdhd.s + (b[mdhd.s] === 1 ? 20 : 12)), asc: null, samples: [] };
+    if (t.codec === "mp4a") {
+      t.asc = esdsConfig(b, dv, entry);
+      try { t.samples = sampleTable(dv, n => child(stbl, n)); } catch (e) { t.samples = []; }
+    }
+    tracks.push(t);
+  }
+  return tracks;
+}
+// AudioSpecificConfig from the esds box, which MOV files tuck inside a
+// 'wave' box after a version-dependent header, so we scan for it.
+function esdsConfig(b, dv, entry) {
+  for (let o = entry.s + 4; o + 8 <= entry.e; o++) {
+    if (b[o] !== 0x65 || b[o + 1] !== 0x73 || b[o + 2] !== 0x64 || b[o + 3] !== 0x73) continue;   // "esds"
+    return descConfig(b, o + 8, Math.min(entry.e, o - 4 + dv.getUint32(o - 4)));
+  }
+  return null;
+}
+function descConfig(b, o, end) {
+  while (o + 2 <= end) {
+    const tag = b[o++]; let len = 0, k = 0;
+    do len = (len << 7) | (b[o] & 0x7f); while ((b[o++] & 0x80) && ++k < 4);
+    if (tag === 3) {   // ES descriptor: skip id, flags and optional fields
+      const f = b[o + 2]; let p = o + 3;
+      if (f & 0x80) p += 2;
+      if (f & 0x40) p += 1 + b[p];
+      if (f & 0x20) p += 2;
+      return descConfig(b, p, o + len);
+    }
+    if (tag === 4) return descConfig(b, o + 13, o + len);   // decoder config: skip fixed fields
+    if (tag === 5) return b.slice(o, o + len);               // decoder-specific info
+    o += len;
+  }
+  return null;
+}
+// File offset, size and duration of every sample, from stsz/stsc/stco/stts.
+function sampleTable(dv, box) {
+  const stsz = box("stsz"), stsc = box("stsc"), stts = box("stts"), stco = box("stco"), co64 = box("co64");
+  if (!stsz || !stsc || !stts || !(stco || co64)) return [];
+  const fixed = dv.getUint32(stsz.s + 4), n = dv.getUint32(stsz.s + 8);
+  const nChunks = dv.getUint32((stco || co64).s + 4), runs = dv.getUint32(stsc.s + 4);
+  const chunkAt = i => stco ? dv.getUint32(stco.s + 8 + 4 * i) : Number(dv.getBigUint64(co64.s + 8 + 8 * i));
+  const out = [];
+  for (let r = 0, si = 0; r < runs; r++) {
+    const first = dv.getUint32(stsc.s + 8 + 12 * r) - 1, per = dv.getUint32(stsc.s + 12 + 12 * r);
+    const last = r + 1 < runs ? dv.getUint32(stsc.s + 20 + 12 * r) - 1 : nChunks;
+    for (let ch = first; ch < last; ch++) {
+      let off = chunkAt(ch);
+      for (let k = 0; k < per && si < n; k++, si++) {
+        const size = fixed || dv.getUint32(stsz.s + 12 + 4 * si);
+        out.push({ off, size, dur: 1024 }); off += size;
+      }
+    }
+  }
+  for (let r = 0, i = 0, runsT = dv.getUint32(stts.s + 4); r < runsT; r++) {
+    const count = dv.getUint32(stts.s + 8 + 8 * r), d = dv.getUint32(stts.s + 12 + 8 * r);
+    for (let k = 0; k < count && i < out.length; k++) out[i++].dur = d;
+  }
+  return out;
+}
+// One AAC track as a standalone .m4a that every browser can decode.
+function remuxAac(b, t) {
+  const a = t.asc, RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+  const fi = ((a[0] & 7) << 1) | (a[1] >> 7);
+  const sampleRate = fi === 15 ? ((a[1] & 0x7f) << 17) | (a[2] << 9) | (a[3] << 1) | (a[4] >> 7) : RATES[fi];
+  const channels = ((fi === 15 ? a[4] : a[1]) >> 3 & 15) || 2;
+  const mux = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), audio: { codec: "aac", numberOfChannels: channels, sampleRate },
+    fastStart: "in-memory", firstTimestampBehavior: "offset" });
+  const meta = { decoderConfig: { codec: `mp4a.40.${a[0] >> 3}`, numberOfChannels: channels, sampleRate, description: a } };
+  let ts = 0;
+  t.samples.forEach((s, i) => {
+    mux.addAudioChunkRaw(b.subarray(s.off, s.off + s.size), "key", Math.round(ts * 1e6 / t.scale), Math.round(s.dur * 1e6 / t.scale), i ? undefined : meta);
+    ts += s.dur;
+  });
+  mux.finalize();
+  return mux.target.buffer;
+}
+
 /* ---------- Adding files ---------- */
 function matchRecipe(fileName) {
   const n = norm(fileName), nn = n.replace(/ /g, "");
@@ -621,8 +750,8 @@ async function addFiles(files) {
     setStatus(`Reading ${f.name} (${i + 1} of ${files.length})…`);
     await tick();
     let buffer;
-    try { buffer = await c.decodeAudioData(await f.arrayBuffer()); }
-    catch (e) { failed.push(f.name); continue; }
+    try { buffer = await decodeFile(c, f); }
+    catch (e) { failed.push({ name: f.name, why: e.why }); continue; }
     setStatus(`Finding the beat in ${f.name}…`);
     await tick();
     const tr = {
@@ -643,7 +772,8 @@ async function addFiles(files) {
     const idx = new Map(state.tracks.map((t, i) => [t, i]));
     state.tracks.sort((a, b) => (a.order - b.order) || (idx.get(a) - idx.get(b)));
   }
-  setStatus(failed.length ? `Couldn't read ${failed.join(", ")}. Your browser can't decode that format. Try an MP3 or M4A copy.` : "", failed.length > 0);
+  setStatus(failed.map(x => x.why ? `Couldn't use ${x.name}: ${x.why}. Try a screen recording or an MP3 copy.`
+    : `Couldn't read ${x.name}. Your browser can't decode that format. Try an MP3 or M4A copy.`).join(" "), failed.length > 0);
   renderAll();
 }
 function setStatus(msg, err) { const s = $("#status"); s.textContent = msg; s.classList.toggle("err", !!err); }
