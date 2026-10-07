@@ -213,12 +213,35 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .pad:disabled { opacity: .45; cursor: not-allowed; }
 .hint { color: var(--muted); font-size: 13px; margin-top: 14px; }
 
-/* Video (coming soon) */
-.soon { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 26px 22px; max-width: 640px; }
-.soon .tag { display: inline-block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
-.soon h2 { font: 400 1.6rem/1.2 var(--display); margin: 6px 0 8px; }
-.soon p { margin: 0 0 10px; color: var(--muted); text-wrap: pretty; }
-.soon ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+/* Video editor */
+.ved { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 940px) { .ved { grid-template-columns: 300px minmax(0, 1fr); } }
+@media (max-width: 939px) { .vstage { order: -1; } }
+.vtools { display: grid; gap: 16px; }
+.vpanel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: grid; gap: 10px; }
+.vpanel h2 { font: 400 1.35rem/1.1 var(--display); margin: 0; }
+.vhelp { margin: 0; color: var(--muted); font-size: 13px; text-wrap: pretty; }
+.vhelp strong { color: var(--ink); }
+.vedit { display: flex; flex-wrap: wrap; gap: 6px; }
+.vedit .btn { padding-inline: 12px; }
+.vname { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); min-width: 0; }
+.vpanel progress { width: 100%; accent-color: var(--accent); height: 6px; }
+.vpanel small { color: var(--muted); font-size: 12.5px; }
+.vstage { display: grid; gap: 10px; min-width: 0; }
+.vprev { position: relative; aspect-ratio: 16 / 9; max-height: 56vh; width: 100%; background: #000; border-radius: 14px; overflow: hidden; }
+.vprev video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; visibility: hidden; }
+.vprev video.on { visibility: visible; }
+.vempty { position: absolute; inset: 0; display: grid; place-items: center; color: #A999AC; font-size: 15px; }
+.vtransport { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vtransport .btn { min-width: 84px; }
+.vtime { margin-left: auto; font-size: 13.5px; color: var(--muted); }
+.vtl-wrap { margin-top: 20px; }
+.vtl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 2px 8px; }
+.vzoom { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.vzoom input { width: 160px; }
+.vtl { overflow-x: auto; overflow-y: hidden; background: var(--sunk); border-radius: 12px; }
+.vtl-inner { height: 132px; }
+.vtl canvas { position: sticky; left: 0; display: block; touch-action: none; }
 .foot { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .foot p { margin: 4px 0; }
 .foot a { color: inherit; text-underline-offset: 2px; }
@@ -460,18 +483,54 @@ img { max-width: 100%; }
 
   <!-- VIDEO -->
   <section id="videoView" hidden>
-    <div class="soon">
-      <span class="tag">Coming soon</span>
-      <h2>Edit your videos, the easy way</h2>
-      <p>Made for creators putting lessons and short videos on LinkedIn, Reels and YouTube. You'll be able to:</p>
-      <ul>
-        <li>Cut out mistakes and join clips, with sound and picture always in sync</li>
-        <li>Smooth transitions between cuts</li>
-        <li>Add a little background music that can dip while you talk</li>
-        <li>Make captions automatically or type your own, and style them</li>
-        <li>Export a high-quality MP4 in the shape you need</li>
-      </ul>
+    <div class="ved">
+      <aside class="vtools">
+        <div class="vpanel">
+          <h2>Clips</h2>
+          <button type="button" class="btn primary" id="vAdd">Add videos</button>
+          <input type="file" id="vFileIn" accept="video/mp4,video/quicktime,.mp4,.mov,.m4v" multiple hidden>
+          <p class="vhelp">MP4 or MOV, or drop them anywhere on this page. They join up in order.</p>
+          <div class="vedit">
+            <button type="button" class="btn" id="vSplit" title="Split the clip at the playhead (S)">Split</button>
+            <button type="button" class="btn" id="vDelete" title="Remove the selected clip (Delete)">Delete</button>
+            <button type="button" class="btn quiet" id="vUndo" title="Undo (Ctrl+Z)">Undo</button>
+            <button type="button" class="btn quiet" id="vRedo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+          </div>
+          <p class="vhelp"><strong>Cut out a mistake:</strong> put the playhead where it starts and press Split, move to where it ends and Split again, then click the middle piece and press Delete.</p>
+          <p class="vhelp">Drag a clip's edge to trim it. Drag a clip to move it.</p>
+        </div>
+        <div class="vpanel">
+          <h2>Export</h2>
+          <label class="label" for="vName">File name</label>
+          <input id="vName" class="vname" placeholder="my-video" autocomplete="off">
+          <button type="button" class="btn primary" id="vExport">Export MP4</button>
+          <progress id="vProg" max="1" value="0" hidden></progress>
+          <small id="vNote">Exports at your video's own size, up to 1080p.</small>
+        </div>
+      </aside>
+      <div class="vstage">
+        <div class="vprev">
+          <video id="vA" playsinline preload="auto"></video>
+          <video id="vB" playsinline preload="auto"></video>
+          <div class="vempty" id="vEmpty">Add a video to start editing</div>
+        </div>
+        <div class="vtransport">
+          <button type="button" class="btn primary" id="vPlay">Play</button>
+          <button type="button" class="icon-btn" id="vBack" aria-label="Back one frame" title="Back one frame (Left arrow)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+          <button type="button" class="icon-btn" id="vFwd" aria-label="Forward one frame" title="Forward one frame (Right arrow)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <span class="mono vtime" id="vTime">0:00.0 / 0:00.0</span>
+        </div>
+      </div>
     </div>
+    <div class="vtl-wrap">
+      <div class="vtl-head">
+        <span class="label">Timeline</span>
+        <label class="vzoom">Zoom <input type="range" id="vZoom" min="0" max="100" value="0"></label>
+      </div>
+      <div class="vtl" id="vtl"><div class="vtl-inner" id="vtlInner"><canvas id="vtlCanvas" role="img" aria-label="Timeline of your clips. Use the buttons or keyboard to edit."></canvas></div></div>
+      <p class="hint kbd-only"><kbd>Space</kbd> play · <kbd>S</kbd> split · <kbd>Delete</kbd> remove · <kbd>←</kbd> <kbd>→</kbd> one frame (<kbd>Shift</kbd> for 1 s) · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Ctrl</kbd>+scroll to zoom</p>
+    </div>
+    <p class="status" id="vStatus" role="status" aria-live="polite"></p>
   </section>
 
   <footer class="foot">
@@ -487,5 +546,6 @@ img { max-width: 100%; }
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="app.js"></script>
+<script src="video.js"></script>
 </body>
 </html>
