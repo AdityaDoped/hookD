@@ -232,13 +232,19 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 /* the players sit under the canvas; the preview is drawn onto the canvas */
 .vprev video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .vprev canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
+/* On a laptop the tools panel keeps one height whatever tab is open and scrolls inside,
+   so switching tabs never moves the timeline below. */
+@media (min-width: 940px) {
+  .vtools-main { height: max(330px, calc(56vh - 190px)); overflow-y: auto; align-content: start; overscroll-behavior: contain; }
+  .vtools-main .vtabs { position: sticky; top: -18px; z-index: 1; box-shadow: 0 -18px 0 var(--surface), 0 8px 0 var(--surface); }
+}
 .vtabs { display: grid; grid-template-columns: repeat(3, 1fr); border-radius: 14px; }
 .vtabs button { padding: 6px 6px; font-size: 13px; border-radius: 11px; }
 .vcap-auto { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px 10px; }
 .vcap-auto select { min-width: 0; font-size: 13.5px; }
 .vtab progress { width: 100%; accent-color: var(--accent); height: 6px; }
 .vcap-head { display: flex; justify-content: space-between; align-items: baseline; }
-.vcap-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 300px; overflow-y: auto; }
+.vcap-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 300px; overflow-y: auto; overscroll-behavior: contain; }
 .vcap-list:empty { display: none; }
 .vcap { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: start; padding: 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
 .vcap.now { border-color: var(--t4); }
@@ -514,7 +520,7 @@ img { max-width: 100%; }
   <section id="videoView" hidden>
     <div class="ved">
       <aside class="vtools">
-        <div class="vpanel">
+        <div class="vpanel vtools-main" id="vToolsPanel">
           <div class="seg vtabs" id="vTabs" role="group" aria-label="Tools">
             <button type="button" data-tab="clips" aria-pressed="true">Clips</button>
             <button type="button" data-tab="caps" aria-pressed="false">Captions</button>
@@ -536,6 +542,8 @@ img { max-width: 100%; }
             </div>
             <p class="vhelp"><strong>Cut out a mistake:</strong> put the playhead where it starts and press Split, move to where it ends and Split again, then click the middle piece and press Delete.</p>
             <p class="vhelp">Drag a clip's edge to trim it. Drag a clip to move it.</p>
+            <p class="vhelp">Your project is saved in this browser, so a reload picks up where you left off.</p>
+            <button type="button" class="btn quiet" id="vNew">Start over</button>
           </div>
 
           <div class="vtab" data-panel="caps" hidden>

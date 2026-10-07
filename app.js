@@ -1643,6 +1643,7 @@ requestAnimationFrame(frame);
 /* ---------- Wiring ---------- */
 function setMode(m) {
   state.mode = m;
+  try { localStorage.setItem("hookd-mode", m); } catch (e) {}
   $("#modeBuild").setAttribute("aria-pressed", m === "build");
   $("#modeLive").setAttribute("aria-pressed", m === "live");
   $("#modeVideo").setAttribute("aria-pressed", m === "video");

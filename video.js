@@ -596,10 +596,10 @@ function changed() {
   V.T = clamp(V.T, 0, vtotal());
   V.sel = V.clips.length ? Math.min(V.sel, V.clips.length - 1) : -1;
   if (V.selJoin < 1 || V.selJoin >= V.clips.length) V.selJoin = -1;
-  sizeTimeline(); sizePreview(); renderCapList(); vtick(); updateUi();
+  sizeTimeline(); sizePreview(); renderCapList(); vtick(); updateUi(); vSave();
 }
 // Settings outside the undo history (music, title, shape) just redraw.
-function settingsChanged() { V.version++; V.T = clamp(V.T, 0, vtotal()); sizeTimeline(); sizePreview(); renderCapList(); vtick(); updateUi(); }
+function settingsChanged() { V.version++; V.T = clamp(V.T, 0, vtotal()); sizeTimeline(); sizePreview(); renderCapList(); vtick(); updateUi(); vSave(); }
 
 /* ---------- Editing ---------- */
 function splitAtPlayhead() {
@@ -886,6 +886,19 @@ function drawCapLane(g, P, W) {
     if (w > 24) g.fillText(x.cap.text.trim() || "(empty)", x0 + 6, y + h / 2);   // the clip cuts off what doesn't fit
     g.restore();
   }
+  // while a caption is being dragged, its length floats above it
+  const d = tl.drag;
+  if (d && d.kind === "cap") {
+    const x = list.find(k => k.cap === d.cap);
+    if (x) {
+      const label = `${(x.cap.e - x.cap.s).toFixed(1)} s`, cx = clamp(xOf((x.t0 + x.t1) / 2), 30, W - 30);
+      g.font = `600 12px ${C.mono || "monospace"}`; g.textAlign = "center";
+      const bw = g.measureText(label).width + 14;
+      roundBox(g, cx - bw / 2, y - 24, bw, 20, C.ink);
+      g.fillStyle = C.surface; g.fillText(label, cx, y - 14);
+      g.textAlign = "left";
+    }
+  }
   g.restore();
 }
 function drawMusic(g, P, W) {
@@ -909,12 +922,21 @@ function drawMusic(g, P, W) {
 const EDGE = 7;
 function hit(x, y) {
   if (y >= tl.capY && y <= tl.capY + tl.capH) {
-    const list = capsOnTimeline(vplan());
-    for (const c of [...list].reverse()) {
-      const x0 = xOf(c.t0), x1 = xOf(c.t1);
-      if (x < x0 - EDGE || x > x1 + EDGE) continue;
-      const wide = x1 - x0 > 3 * EDGE;
-      return { cap: c, edge: wide && Math.abs(x - x0) <= EDGE ? "l" : wide && Math.abs(x - x1) <= EDGE ? "r" : null };
+    // the caption under the pointer wins, so where two captions touch, the side you
+    // point at is the one that moves; short captions get a third of their width per edge
+    const list = capsOnTimeline(vplan()), edges = c => {
+      const x0 = xOf(c.t0), x1 = xOf(c.t1), zone = Math.min(EDGE, Math.max(3, (x1 - x0) / 3));
+      return { x0, x1, zone };
+    };
+    const under = [...list].reverse().find(c => { const k = edges(c); return x >= k.x0 && x <= k.x1; });
+    if (under) {
+      const k = edges(under);
+      return { cap: under, edge: x - k.x0 <= k.zone ? "l" : k.x1 - x <= k.zone ? "r" : null };
+    }
+    for (const c of list) {
+      const k = edges(c);
+      if (k.x0 - x > 0 && k.x0 - x <= k.zone) return { cap: c, edge: "l" };
+      if (x - k.x1 > 0 && x - k.x1 <= k.zone) return { cap: c, edge: "r" };
     }
     return null;
   }
@@ -947,8 +969,11 @@ tl.cv.addEventListener("pointerdown", e => {
   V.selCap = h && h.cap ? h.cap.cap.id : null;
   if (h && h.cap) {
     V.sel = -1; V.selJoin = -1;
-    const cap = h.cap.cap;
-    tl.drag = { kind: "cap", cap, edge: h.edge, x0: x, orig: { s: cap.s, e: cap.e }, pps: pps() };
+    const cap = h.cap.cap, same = V.caps.filter(k => k !== cap && k.src === cap.src);
+    // neighbours in the same video: a caption can't be dragged over them
+    const lo = Math.max(cap.src.start, ...same.filter(k => k.e <= cap.s + 1e-6).map(k => k.e));
+    const hi = Math.min(cap.src.end, ...same.filter(k => k.s >= cap.e - 1e-6).map(k => k.s));
+    tl.drag = { kind: "cap", cap, edge: h.edge, x0: x, orig: { s: cap.s, e: cap.e }, lo, hi, pps: pps() };
     showTab("caps"); renderCapList(); focusCapRow(cap.id, false);
     if (!h.edge) vSeek(h.cap.t0 + 0.01); else vPause();
   } else if (h && h.join != null) {
@@ -979,11 +1004,11 @@ tl.cv.addEventListener("pointermove", e => {
   }
   if (d.kind === "scrub") { vSeek(tOf(x)); return; }
   if (d.kind === "cap") {
-    // captions move in their video's own time, staying inside it
-    const c = d.cap, src = c.src, dt = (x - d.x0) / pps(), MIN = 0.3;
-    if (d.edge === "l") c.s = clamp(d.orig.s + dt, src.start, c.e - MIN);
-    else if (d.edge === "r") c.e = clamp(d.orig.e + dt, c.s + MIN, src.end);
-    else { const sh = clamp(dt, src.start - d.orig.s, src.end - d.orig.e); c.s = d.orig.s + sh; c.e = d.orig.e + sh; }
+    // captions move in their video's own time, between their neighbours
+    const c = d.cap, dt = (x - d.x0) / pps(), MIN = 0.3;
+    if (d.edge === "l") c.s = clamp(d.orig.s + dt, d.lo, c.e - MIN);
+    else if (d.edge === "r") c.e = clamp(d.orig.e + dt, c.s + MIN, d.hi);
+    else { const sh = clamp(dt, d.lo - d.orig.s, d.hi - d.orig.e); c.s = d.orig.s + sh; c.e = d.orig.e + sh; }
     d.moved = d.moved || Math.abs(x - d.x0) > 2;
     V.version++;
     vtick();
@@ -1010,7 +1035,7 @@ function endDrag() {
   tl.cv.style.cursor = "";
   sizeTimeline();
   if (d.kind === "cap") {
-    if (d.moved) { renderCapList(); focusCapRow(d.cap.id, false); vStatus("Caption timing changed."); }
+    if (d.moved) { renderCapList(); focusCapRow(d.cap.id, false); vStatus("Caption timing changed."); vSave(); }
     updateUi();
     return;
   }
@@ -1236,6 +1261,7 @@ async function addVideos(files) {
     try {
       const s = await openSource(f);
       V.sources.push(s); added.push(s);
+      storeFile("src-" + s.id, f);
       V.clips.push({ id: V.nextId++, src: s, in: s.start, out: s.end, trans: null });
       if (!$("#vName").value.trim()) $("#vName").value = s.name;
     } catch (e) { failed.push(`${f.name}: ${(e && e.message) || "it couldn't be read"}`); }
@@ -1257,6 +1283,7 @@ async function addMusic(file) {
   try {
     const buffer = await decodeFile(audio(), file);
     V.music = { name: cleanName(file.name), buffer, vol: +$("#vMusicVol").value / 100, duck: $("#vDuck").checked };
+    storeFile("music", file);
     vStatus(`Added music: ${V.music.name}.`);
   } catch (e) {
     vStatus(`Couldn't read ${file.name}${e && e.why ? ": " + e.why : ". Try an MP3 or M4A file"}.`, true);
@@ -1264,8 +1291,137 @@ async function addMusic(file) {
   settingsChanged();
 }
 
+/* ---------- Saved project (this browser only) ----------
+   The videos, music and the whole edit live in IndexedDB, so a reload or a later
+   visit picks up where you left off. A separate database from Build mode's,
+   which tidies away files it doesn't know. */
+const vstore = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    try {
+      const r = indexedDB.open("hookd-video", 1);
+      r.onupgradeneeded = () => { r.result.createObjectStore("files"); r.result.createObjectStore("project"); };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+      r.onblocked = () => rej(new Error("blocked"));
+    } catch (e) { rej(e); }
+  }));
+  const tx = async (name, mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const t = db.transaction(name, mode), req = fn(t.objectStore(name));
+      t.oncomplete = () => res(req && req.result);
+      t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+    });
+  };
+  return {
+    putFile: (k, f) => tx("files", "readwrite", s => s.put(f, k)),
+    getFile: k => tx("files", "readonly", s => s.get(k)),
+    fileKeys: () => tx("files", "readonly", s => s.getAllKeys()),
+    delFile: k => tx("files", "readwrite", s => s.delete(k)),
+    put: v => tx("project", "readwrite", s => s.put(v, "current")),
+    get: () => tx("project", "readonly", s => s.get("current")),
+    clear: () => Promise.all([tx("files", "readwrite", s => s.clear()), tx("project", "readwrite", s => s.clear())]),
+  };
+})();
+let vRestoring = true, vSaveT = 0, vSaveOK = true, vStoring = 0;
+// store a video or music file; leaving the page warns until it has landed
+function storeFile(k, f) {
+  if (!vSaveOK) return;
+  vStoring++;
+  vstore.putFile(k, f).catch(vSaveFail).finally(() => vStoring--);
+}
+function vSaveFail() {
+  if (!vSaveOK) return;
+  vSaveOK = false;
+  toast("This browser isn't letting the page save your videos, so a reload will clear them.");
+}
+function projectData() {
+  return {
+    v: 1, nextId: V.nextId, name: $("#vName").value,
+    sources: V.sources.map(s => ({ id: s.id, name: s.name, color: s.color })),
+    clips: V.clips.map(c => ({ id: c.id, src: c.src.id, in: c.in, out: c.out, trans: c.trans || null })),
+    caps: V.caps.map(k => ({ id: k.id, src: k.src.id, s: k.s, e: k.e, text: k.text })),
+    title: V.title, shape: V.shape, fit: V.fit, capLook: V.capLook,
+    music: V.music ? { name: V.music.name, vol: V.music.vol, duck: V.music.duck } : null,
+  };
+}
+function vSave() {
+  if (vRestoring || !vSaveOK) return;
+  clearTimeout(vSaveT);
+  vSaveT = setTimeout(() => { if (!vRestoring) vstore.put(projectData()).catch(vSaveFail); }, 500);
+}
+async function vRestore() {
+  let p;
+  try { p = await vstore.get(); } catch (e) { vSaveOK = false; return; }
+  if (!p || p.v !== 1 || !p.clips || !p.clips.length) return;
+  vStatus("Opening your last video project…");
+  const byId = new Map();
+  let failed = 0;
+  for (let i = 0; i < p.sources.length; i++) {
+    const saved = p.sources[i];
+    if (!p.clips.some(c => c.src === saved.id) && !p.caps.some(k => k.src === saved.id)) continue;
+    vStatus(`Opening your last video project: ${saved.name} (${i + 1} of ${p.sources.length})…`);
+    try {
+      const file = await vstore.getFile("src-" + saved.id);
+      if (!file) throw new Error("missing");
+      const s = await openSource(file);
+      Object.assign(s, { id: saved.id, name: saved.name, color: saved.color });
+      V.sources.push(s); byId.set(saved.id, s);
+    } catch (e) { failed++; }
+  }
+  V.clips = p.clips.filter(c => byId.has(c.src)).map(c => ({ ...c, src: byId.get(c.src) }));
+  V.caps = (p.caps || []).filter(k => byId.has(k.src)).map(k => ({ ...k, src: byId.get(k.src) }));
+  Object.assign(V.title, p.title || {}); Object.assign(V.capLook, p.capLook || {});
+  V.shape = p.shape || V.shape; V.fit = p.fit || V.fit;
+  V.nextId = Math.max(p.nextId || 1, ...V.sources.map(s => s.id + 1), ...V.clips.map(c => c.id + 1), ...V.caps.map(k => k.id + 1));
+  if (p.name) $("#vName").value = p.name;
+  if (p.music) {
+    try {
+      const f = await vstore.getFile("music");
+      V.music = { name: p.music.name, buffer: await decodeFile(audio(), f), vol: p.music.vol, duck: p.music.duck };
+    } catch (e) { failed++; }
+  }
+  // put the forms back as they were
+  $("#vTitleOn").checked = V.title.on; $("#vTitleText").value = V.title.text; $("#vTitleSub").value = V.title.sub; $("#vTitleDur").value = String(V.title.dur);
+  if (V.music) { $("#vMusicVol").value = Math.round(V.music.vol * 100); $("#vDuck").checked = V.music.duck; }
+  V.sel = V.clips.length ? 0 : -1;
+  vStatus(failed ? `Opened your last project, but ${failed} file${failed > 1 ? "s" : ""} couldn't be read back. Add ${failed > 1 ? "them" : "it"} again.` : "Picked up where you left off.", failed > 0);
+  if (!failed) setTimeout(() => { if ($("#vStatus").textContent === "Picked up where you left off.") vStatus(""); }, 4000);
+}
+async function vRestoreAll() {
+  try { await vRestore(); } catch (e) {} finally { vRestoring = false; }
+  V.version++;
+  sizeTimeline(); sizePreview(); renderCapList(); vtick(); updateUi();
+  // tidy away stored videos the project no longer uses
+  try {
+    const keep = new Set(V.sources.map(s => "src-" + s.id).concat(V.music ? ["music"] : []));
+    for (const k of await vstore.fileKeys()) if (!keep.has(k)) await vstore.delFile(k);
+  } catch (e) {}
+}
+let startOverArmed = 0;
+async function startOver() {
+  const b = $("#vNew");
+  if (!startOverArmed) {
+    b.textContent = "Click again to clear everything"; b.classList.add("danger");
+    startOverArmed = setTimeout(() => { startOverArmed = 0; b.textContent = "Start over"; b.classList.remove("danger"); }, 4000);
+    return;
+  }
+  clearTimeout(startOverArmed); startOverArmed = 0; b.textContent = "Start over"; b.classList.remove("danger");
+  if (capJob) cancelAutoCaptions();
+  vPause();
+  V.sources.forEach(s => URL.revokeObjectURL(s.url));
+  Object.assign(V, { sources: [], clips: [], caps: [], undo: [], redo: [], sel: -1, selJoin: -1, selCap: null, T: 0, music: null });
+  Object.assign(V.title, { on: false, text: "", sub: "", dur: 3 });
+  $("#vTitleOn").checked = false; $("#vTitleText").value = ""; $("#vTitleSub").value = ""; $("#vName").value = "";
+  els.forEach(e => { e.removeAttribute("src"); e.dataset.src = ""; e.itemId = null; e.load(); });
+  try { await vstore.clear(); } catch (e) {}
+  changed();
+  vStatus("Cleared. Add videos to start a new project.");
+}
+
 /* ---------- Captions panel ---------- */
-function capsChanged() { V.version++; renderCapList(); vtick(); updateUi(); }
+function capsChanged() { V.version++; renderCapList(); vtick(); updateUi(); vSave(); }
 // The list shows captions in the order they play in the edited video.
 function renderCapList() {
   const box = $("#vCapList"), P = vplan(), seen = new Set(), rows = [];
@@ -1282,7 +1438,7 @@ function renderCapList() {
     const text = document.createElement("textarea");
     text.rows = 2; text.value = x.cap.text; text.setAttribute("aria-label", `Caption at ${fmt(x.t0, 1)}`);
     text.addEventListener("focus", () => { V.selCap = x.cap.id; markSelectedRow(); if (!V.playing) vSeek(x.t0 + 0.01); });
-    text.addEventListener("input", () => { x.cap.text = text.value; V.version++; vtick(); });
+    text.addEventListener("input", () => { x.cap.text = text.value; V.version++; vtick(); vSave(); });
     const del = document.createElement("button");
     del.type = "button"; del.className = "icon-btn"; del.setAttribute("aria-label", `Delete caption at ${fmt(x.t0, 1)}`);
     del.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
@@ -1295,10 +1451,19 @@ function renderCapList() {
   if (focusedId) { const r = box.querySelector(`.vcap[data-id="${focusedId}"] textarea`); if (r) r.focus({ preventScroll: true }); }
 }
 function markSelectedRow() { document.querySelectorAll("#vCapList .vcap").forEach(r => r.classList.toggle("sel", r.dataset.id == V.selCap)); }
+// Bring a row into view by scrolling the list (and the tools panel) only, never the page,
+// so the timeline stays put under the pointer.
+function showRow(row) {
+  for (const box of [$("#vCapList"), $("#vToolsPanel")]) {
+    const r = row.getBoundingClientRect(), b = box.getBoundingClientRect();
+    if (r.top < b.top) box.scrollTop -= b.top - r.top + 4;
+    else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom + 4;
+  }
+}
 function focusCapRow(id, focusText = true) {
   const row = $(`#vCapList .vcap[data-id="${id}"]`);
   if (!row) return;
-  row.scrollIntoView({ block: "nearest" });
+  showRow(row);
   if (focusText) row.querySelector("textarea").focus({ preventScroll: true });
 }
 let lastActiveCap = null;
@@ -1307,7 +1472,7 @@ function markActiveCap(x) {
   if (id === lastActiveCap) return;
   lastActiveCap = id;
   document.querySelectorAll("#vCapList .vcap").forEach(r => r.classList.toggle("now", r.dataset.id == id));
-  if (id && V.playing) { const row = $(`#vCapList .vcap[data-id="${id}"]`); if (row && !row.contains(document.activeElement)) row.scrollIntoView({ block: "nearest" }); }
+  if (id && V.playing) { const row = $(`#vCapList .vcap[data-id="${id}"]`); if (row && !row.contains(document.activeElement)) showRow(row); }
 }
 function addCaptionAtPlayhead() {
   if (!V.clips.length || V.exporting) return;
@@ -1566,13 +1731,13 @@ $("#vTransAll").addEventListener("click", () => {
 // music
 $("#vMusicAdd").addEventListener("click", () => $("#vMusicIn").click());
 $("#vMusicIn").addEventListener("change", e => { addMusic(e.target.files[0]); e.target.value = ""; });
-$("#vMusicDel").addEventListener("click", () => { vPause(); V.music = null; settingsChanged(); vStatus("Removed the music."); });
-$("#vMusicVol").addEventListener("input", e => { if (V.music) { V.music.vol = e.target.value / 100; V.version++; } });
-$("#vDuck").addEventListener("change", e => { if (V.music) { V.music.duck = e.target.checked; V.version++; } });
+$("#vMusicDel").addEventListener("click", () => { vPause(); V.music = null; vstore.delFile("music").catch(() => {}); settingsChanged(); vStatus("Removed the music."); });
+$("#vMusicVol").addEventListener("input", e => { if (V.music) { V.music.vol = e.target.value / 100; V.version++; vSave(); } });
+$("#vDuck").addEventListener("change", e => { if (V.music) { V.music.duck = e.target.checked; V.version++; vSave(); } });
 // title card
 $("#vTitleOn").addEventListener("change", e => { V.title.on = e.target.checked; settingsChanged(); if (V.title.on) vSeek(0); });
-$("#vTitleText").addEventListener("input", e => { V.title.text = e.target.value; vtick(); });
-$("#vTitleSub").addEventListener("input", e => { V.title.sub = e.target.value; vtick(); });
+$("#vTitleText").addEventListener("input", e => { V.title.text = e.target.value; vtick(); vSave(); });
+$("#vTitleSub").addEventListener("input", e => { V.title.sub = e.target.value; vtick(); vSave(); });
 $("#vTitleDur").addEventListener("change", e => { V.title.dur = +e.target.value; settingsChanged(); });
 // shape
 $("#vShapes").addEventListener("click", e => { const b = e.target.closest("[data-shape]"); if (b) { V.shape = b.dataset.shape; settingsChanged(); } });
@@ -1583,10 +1748,10 @@ $("#vCapAdd").addEventListener("click", addCaptionAtPlayhead);
 $("#vCapImport").addEventListener("click", () => $("#vCapIn").click());
 $("#vCapIn").addEventListener("change", e => { importSubs(e.target.files[0]); e.target.value = ""; });
 $("#vCapSrt").addEventListener("click", saveSrt);
-$("#vCapBurn").addEventListener("change", e => { V.capLook.burn = e.target.checked; updateUi(); });
+$("#vCapBurn").addEventListener("change", e => { V.capLook.burn = e.target.checked; updateUi(); vSave(); });
 [["#vCapStyle", "style"], ["#vCapSize", "size"], ["#vCapPos", "pos"]].forEach(([sel, key]) => $(sel).addEventListener("click", e => {
   const b = e.target.closest(`[data-${key}]`); if (!b) return;
-  V.capLook[key] = b.dataset[key]; vtick(); updateUi();
+  V.capLook[key] = b.dataset[key]; vtick(); updateUi(); vSave();
 }));
 // backup for when the page isn't drawing (another tab in front): still honour the cuts
 els.forEach(el => el.addEventListener("timeupdate", () => { if (V.playing && document.hidden) vtick(); }));
@@ -1614,5 +1779,11 @@ document.addEventListener("keydown", e => {
   else if (k === "Home") { e.preventDefault(); vSeek(0); }
   else if (k === "End") { e.preventDefault(); vSeek(vtotal()); }
 });
-window.addEventListener("beforeunload", e => { if (V.exporting || V.clips.length) { e.preventDefault(); e.returnValue = ""; } });
+// the project is saved, so leaving only needs a warning mid-export or while a file is still being stored
+window.addEventListener("beforeunload", e => { if (V.exporting || vStoring) { e.preventDefault(); e.returnValue = ""; } });
+$("#vName").addEventListener("input", vSave);
+$("#vNew").addEventListener("click", startOver);
+// reopen in Video mode if that's where the last visit ended
+try { if (localStorage.getItem("hookd-mode") === "video") setMode("video"); } catch (e) {}
 updateUi();
+vRestoreAll();
