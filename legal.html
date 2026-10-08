@@ -7,20 +7,19 @@
 <meta name="description" content="How Hookd handles your data, the terms for using it, and how copyright works for mashups you make.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2316111B'/%3E%3Cpath d='M20 14v36M20 34c0-7 5-11 11-11s11 4 11 11v16' stroke='%23FF5C9A' stroke-width='7' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&family=Yatra+One&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Hind:wght@400;600;700&family=Yatra+One&display=swap">
 <style>
-:root { --bg: #FBF6F3; --surface: #FFFFFF; --ink: #241A2C; --muted: #6D6072; --line: #E7DBD8; --accent: #C2185B; --focus: #5E35B1; }
-@media (prefers-color-scheme: dark) {
-  :root { color-scheme: dark; --bg: #16111B; --surface: #211A29; --ink: #F2EAF1; --muted: #A999AC; --line: #362C40; --accent: #FF5C9A; --focus: #B9A4FF; }
-}
+/* Sangeet Night, as on the main page */
+:root { color-scheme: dark; --bg: #240A1C; --glow: #4A1033; --surface: #33112A; --ink: #FCEFE6; --muted: #D2A7B9; --line: #4D1D3D; --accent: #FF4F9A; --gold: #FFB627; --focus: #FFB627; }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.65 "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { margin: 0; background: radial-gradient(110% 50% at 0% 0%, var(--glow) 0%, var(--bg) 60%) no-repeat, var(--bg); color: var(--ink); font: 400 16px/1.65 "Hind", system-ui, -apple-system, "Segoe UI", sans-serif; }
 main { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
 a { color: var(--accent); text-underline-offset: 2px; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.home { display: inline-block; font: 400 1.8rem/1 "Yatra One", Georgia, serif; color: var(--ink); text-decoration: none; }
+.home { display: inline-block; font: 400 1.8rem/1 "Yatra One", Georgia, serif; color: var(--gold); text-shadow: 0 2px 0 #9C2A00; text-decoration: none; }
 .home span { color: var(--accent); }
-h1 { font: 700 2rem/1.2 "Figtree", sans-serif; margin: 28px 0 4px; }
+h1 { font: 800 2rem/1.15 "Bricolage Grotesque", sans-serif; letter-spacing: -0.02em; margin: 28px 0 4px; }
+h2 { font-family: "Bricolage Grotesque", sans-serif; font-weight: 800; letter-spacing: -0.01em; }
 .updated { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
 nav.toc { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 12px 0; border-block: 1px solid var(--line); font-size: 14px; font-weight: 600; }
 h2 { font-size: 1.3rem; margin: 40px 0 8px; scroll-margin-top: 16px; }
@@ -83,7 +82,7 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line);
     <li><a href="https://github.com/huggingface/transformers.js">Transformers.js</a> and <a href="https://github.com/microsoft/onnxruntime">ONNX Runtime</a> for automatic captions (Apache 2.0 and MIT), running OpenAI's <a href="https://github.com/openai/whisper">Whisper</a> speech model (MIT)</li>
     <li>Meta's <a href="https://github.com/facebookresearch/demucs">Demucs</a> (HTDemucs v4) for Vocals only and Beat only (MIT), in the <a href="https://huggingface.co/webnn/stem-separator">ONNX export by the WebNN team</a> (MIT), running on ONNX Runtime (MIT)</li>
     <li><a href="https://github.com/Signalsmith-Audio/signalsmith-stretch">Signalsmith Stretch</a> for key matching (MIT)</li>
-    <li>Yatra One, Figtree, JetBrains Mono, Lato, Poppins and Playfair Display from Google Fonts (SIL Open Font License)</li>
+    <li>Yatra One, Bricolage Grotesque, Hind, Figtree, JetBrains Mono, Lato, Poppins and Playfair Display from Google Fonts (SIL Open Font License)</li>
   </ul>
 
   <h2 id="contact">Contact</h2>

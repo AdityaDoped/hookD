@@ -6,8 +6,7 @@
 <title>Hookd: mashup maker and video editor with auto captions</title>
 <meta name="description" content="Make song mashups and edit videos right in your browser. Blend songs with DJ transitions or play them live, and cut videos with transitions, music and automatic captions, then download MP3 or MP4 for Reels, Shorts and LinkedIn.">
 <meta name="google-site-verification" content="ztYtX5D4l0S0TTE5uOyNsXIfh3EDQUEvqHgdb5w0EAo">
-<meta name="theme-color" content="#FBF6F3" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#16111B" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#240A1C">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Hookd: mashups and video edits in your browser">
 <meta property="og:description" content="Mash up songs with DJ transitions, or edit videos with cuts, transitions, music and automatic captions. MP3 and MP4 for Reels, Shorts and LinkedIn.">
@@ -23,57 +22,45 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&family=Lato:wght@400;700;900&family=Playfair+Display:wght@400;700;900&family=Poppins:wght@400;700;800&family=Yatra+One&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700;800&family=Hind:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Lato:wght@400;700;900&family=Playfair+Display:wght@400;700;900&family=Poppins:wght@400;700;800&family=Yatra+One&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/webm-muxer@5.0.3/build/webm-muxer.js" integrity="sha384-vL76GQggj7ndN5m42/LGWeL3mWO5CracI0aNzP01aVy5ZcEiZu9k51xHUlSd/ts7" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.js" integrity="sha384-SujebcgqCNlLMRSnVkLD+3eWOzsxobv30Bct+0lV+fc1EHHEuvcePwmDgMzpnptj" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js" integrity="sha384-xuasJXVcyv3hZq0eYpelEkBC8l4yufatZXDsKuyCU2rqfhDCb+ftuE/mSfZAteiK" crossorigin="anonymous"></script>
 <style>
+/* Sangeet Night: one deliberate look, wine and plum lit by marigold and hot pink,
+   like stage lights at a sangeet. Dark in every theme, on purpose. */
 :root {
-  --bg: #FBF6F3;
-  --surface: #FFFFFF;
-  --sunk: #F4ECE9;
-  --ink: #241A2C;
-  --muted: #6D6072;
-  --line: #E7DBD8;
-  --accent: #C2185B;
-  --accent-ink: #FFFFFF;
-  --gold: #D98A00;
-  --hindi: #B26F00;
-  --slowed: #5E35B1; --slowed-ink: #FFFFFF; --sped: #E65100; --sped-ink: #FFFFFF;
-  --wave: #C9BAC6;
-  --focus: #5E35B1;
-  --ok: #2E7D4F;
-  --err: #B3261E;
-  --t1: #C2185B; --t2: #D98A00; --t3: #00897B; --t4: #5E35B1; --t5: #D84315; --t6: #2E7D32;
-  --shadow: 0 1px 2px rgba(36, 26, 44, .06), 0 8px 24px rgba(36, 26, 44, .06);
-  --display: "Yatra One", "Georgia", serif;
-  --body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --bg: #16111B; --surface: #211A29; --sunk: #1B1522; --ink: #F2EAF1; --muted: #A999AC;
-    --line: #362C40; --accent: #FF5C9A; --accent-ink: #1A0A12; --gold: #FFC24A; --hindi: #FFC24A; --wave: #54475E;
-    --slowed: #A58BFF; --slowed-ink: #160E2A; --sped: #FFC24A; --sped-ink: #1F1400;
-    --focus: #B9A4FF; --ok: #6FD39A; --err: #FF8A80;
-    --t1: #FF5C9A; --t2: #FFC24A; --t3: #3FD0BD; --t4: #A58BFF; --t5: #FF8A5C; --t6: #7CD67F;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
-  }
-}
-:root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #16111B; --surface: #211A29; --sunk: #1B1522; --ink: #F2EAF1; --muted: #A999AC;
-  --line: #362C40; --accent: #FF5C9A; --accent-ink: #1A0A12; --gold: #FFC24A; --hindi: #FFC24A; --wave: #54475E;
-  --slowed: #A58BFF; --slowed-ink: #160E2A; --sped: #FFC24A; --sped-ink: #1F1400;
-  --focus: #B9A4FF; --ok: #6FD39A; --err: #FF8A80;
-  --t1: #FF5C9A; --t2: #FFC24A; --t3: #3FD0BD; --t4: #A58BFF; --t5: #FF8A5C; --t6: #7CD67F;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  --bg: #240A1C;
+  --glow: #4A1033;          /* the plum light in the top corner */
+  --surface: #33112A;
+  --sunk: #2A0C22;
+  --ink: #FCEFE6;
+  --muted: #D2A7B9;
+  --line: #4D1D3D;
+  --accent: #FF4F9A;        /* hot pink for highlights and text accents */
+  --accent-ink: #FFFFFF;
+  --btn: #D92D73;           /* the main button: deep enough for white text */
+  --btn-edge: #8E1450;
+  --gold: #FFB627;          /* marigold */
+  --gold-ink: #2A0B1F;
+  --gold-edge: #9C5A00;
+  --slowed: #B39BFF; --slowed-ink: #1A0E33; --sped: #FFB627; --sped-ink: #2A0B1F;
+  --wave: #6A3A57;
+  --focus: #FFB627;
+  --ok: #7EE0A6;
+  --err: #FF8A80;
+  --t1: #FF4F9A; --t2: #FFB627; --t3: #3FD0BD; --t4: #B39BFF; --t5: #FF8A5C; --t6: #8EDB7F;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 10px 28px rgba(0, 0, 0, .3);
+  --logo: "Yatra One", Georgia, serif;
+  --display: "Bricolage Grotesque", "Figtree", system-ui, sans-serif;
+  --body: "Hind", "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { background: var(--bg); color: var(--ink); font: 400 15px/1.5 var(--body); }
+body { background: radial-gradient(110% 60% at 0% 0%, var(--glow) 0%, var(--bg) 60%) no-repeat, var(--bg); color: var(--ink); font: 400 16px/1.5 var(--body); min-height: 100vh; }
 .wrap { max-width: 1180px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; }
 button, input, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -81,17 +68,35 @@ button, input, select { font: inherit; color: inherit; }
 
 /* Masthead */
 .masthead { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 32px; margin-bottom: 22px; }
-.masthead h1 { display: flex; align-items: center; gap: .3em; font: 400 clamp(2.4rem, 6vw, 3.6rem)/1 var(--display); margin: 0; letter-spacing: .01em; }
+.masthead h1 { display: flex; align-items: center; gap: .3em; font: 400 clamp(2.2rem, 5vw, 3rem)/1 var(--logo); margin: 0; letter-spacing: .01em; color: var(--gold); text-shadow: 0 2px 0 #9C2A00; }
 .masthead h1 .mark { width: 1.15em; height: 1.15em; flex: none; }
 .masthead h1 .d { color: var(--accent); }
-.masthead h1 .hi { font-size: .45em; color: var(--hindi); align-self: center; padding-top: .3em; letter-spacing: 0; }
-.masthead p { margin: 6px 0 0; color: var(--muted); max-width: 52ch; text-wrap: pretty; }
+.masthead .hero { margin: 14px 0 0; font: 800 clamp(1.7rem, 4.4vw, 2.6rem)/1.05 var(--display); letter-spacing: -0.02em; color: var(--ink); text-wrap: balance; max-width: 20ch; }
+.masthead .hero span { color: var(--gold); }
+.masthead p { margin: 10px 0 0; color: var(--muted); max-width: 58ch; text-wrap: pretty; }
 
 /* Bar */
-.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-block: 12px; border-block: 1px solid var(--line); margin-bottom: 22px; }
-.seg { display: inline-flex; background: var(--sunk); border-radius: 999px; padding: 3px; gap: 2px; flex-wrap: wrap; }
-.seg button { border: 0; background: transparent; padding: 7px 14px; border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 14px; color: var(--muted); }
-.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 18px; padding-block: 4px 18px; border-bottom: 1px solid var(--line); margin-bottom: 22px; }
+/* The three modes, as cards with a one-line promise each */
+.modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; flex: 1 1 560px; max-width: 760px; }
+.mode { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; align-items: center; text-align: left; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 16px; padding: 12px 14px; cursor: pointer; transition: transform .15s, border-color .15s, background .15s, box-shadow .15s; }
+.mode svg { grid-row: 1 / 3; width: 26px; height: 26px; color: var(--gold); }
+.mode b { font: 700 15px/1.2 var(--display); }
+.mode span { font-size: 13px; line-height: 1.25; color: var(--muted); }
+.mode:hover { transform: translateY(-2px) rotate(-.6deg); border-color: var(--gold); }
+.mode[aria-pressed="true"] { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); box-shadow: 0 5px 0 var(--gold-edge); transform: none; }
+.mode[aria-pressed="true"] svg, .mode[aria-pressed="true"] span { color: var(--gold-ink); }
+@media (max-width: 640px) {
+  .modes { gap: 6px; }
+  .mode { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; padding: 10px 6px; row-gap: 4px; }
+  .mode svg { grid-row: auto; width: 22px; height: 22px; }
+  .mode b { font-size: 13.5px; }
+  .mode span { display: none; }
+}
+.seg { display: inline-flex; background: var(--sunk); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; padding: 7px 14px; border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 14px; color: var(--muted); transition: background .15s, color .15s; }
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--gold); color: var(--gold-ink); font-weight: 700; }
 .seg button[data-vibe="slowed"][aria-pressed="true"] { background: var(--slowed); color: var(--slowed-ink); }
 .seg button[data-vibe="sped"][aria-pressed="true"] { background: var(--sped); color: var(--sped-ink); }
 .live-top .live-vibe { min-width: 0; flex-basis: 100%; }
@@ -105,17 +110,20 @@ button, input, select { font: inherit; color: inherit; }
 
 .drop { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 20px; border: 2px dashed var(--line); border-radius: 14px; padding: 26px 22px; background: var(--surface); transition: border-color .15s, background .15s; }
 .drop.over { border-color: var(--accent); background: var(--sunk); }
-.drop .big { font: 400 1.35rem/1.2 var(--display); margin: 0; }
+.drop .big { font: 800 1.4rem/1.15 var(--display); letter-spacing: -0.01em; margin: 0; }
 .drop p { margin: 2px 0 0; color: var(--muted); font-size: 13.5px; }
 .drop .txt { flex: 1 1 260px; }
 .drop.compact { padding: 14px 18px; }
 .drop.compact .big { font-size: 1.05rem; }
 
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); padding: 9px 16px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; white-space: nowrap; }
-.btn:hover { border-color: var(--muted); }
-.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-.btn.primary:hover { filter: brightness(1.06); }
-.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 9px 18px; border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 15px; white-space: nowrap; transition: transform .12s, box-shadow .12s, border-color .15s, background .15s; }
+.btn:hover { border-color: var(--gold); }
+/* the main action: a hot-pink pill that presses down */
+.btn.primary { background: var(--btn); color: var(--accent-ink); border-color: var(--btn); font-weight: 700; box-shadow: 0 4px 0 var(--btn-edge); }
+.btn.primary:hover { transform: translateY(-2px); box-shadow: 0 6px 0 var(--btn-edge); border-color: var(--btn); }
+.btn.primary:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--btn-edge); }
+.btn:disabled, .btn:disabled:hover { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; border-color: var(--line); }
+.btn.primary:disabled { border-color: var(--btn); }
 .icon-btn { border: 0; background: transparent; width: 32px; height: 32px; border-radius: 8px; display: inline-grid; place-items: center; cursor: pointer; color: var(--muted); }
 .icon-btn:hover { background: var(--sunk); color: var(--ink); }
 .icon-btn:disabled { opacity: .3; cursor: default; background: transparent; }
@@ -159,9 +167,9 @@ button, input, select { font: inherit; color: inherit; }
 .intro .step { font: 600 12px var(--mono); color: var(--accent); }
 
 /* Mix panel */
-.mix { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; display: grid; gap: 16px; box-shadow: var(--shadow); }
+.mix { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; box-shadow: var(--shadow); }
 @media (min-width: 940px) { .mix { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); } }
-.mix h2 { font: 400 1.5rem/1.1 var(--display); margin: 0; }
+.mix h2 { font: 800 1.55rem/1.1 var(--display); letter-spacing: -0.01em; margin: 0; }
 .field { display: grid; gap: 6px; }
 .field .row { display: flex; justify-content: space-between; align-items: baseline; }
 .field label { font-weight: 600; font-size: 14px; }
@@ -193,7 +201,7 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .transport .time { font: 13px var(--mono); color: var(--muted); }
 .export { display: grid; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 .export .row { display: flex; gap: 8px; }
-.export input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.export input { flex: 1; width: 0; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .export progress { width: 100%; accent-color: var(--accent); height: 6px; }
 .export small { color: var(--muted); font-size: 12.5px; }
 
@@ -208,7 +216,7 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .pad:hover { border-color: var(--c); }
 .pad:active { transform: scale(.98); }
 .pad .key { font: 600 12px var(--mono); color: var(--c); border: 1px solid var(--c); border-radius: 6px; padding: 1px 7px; align-self: flex-start; }
-.pad .pn { font: 400 1.25rem/1.15 var(--display); margin-top: 8px; }
+.pad .pn { font: 800 1.2rem/1.15 var(--display); margin-top: 8px; }
 .pad .pm { font-size: 12.5px; color: var(--muted); }
 .pad .pbar { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: var(--sunk); }
 .pad .pbar i { display: block; height: 100%; width: 0; background: var(--c); }
@@ -224,7 +232,7 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 @media (max-width: 939px) { .vstage { order: -1; } }
 .vtools { display: grid; gap: 16px; }
 .vpanel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: grid; gap: 10px; }
-.vpanel h2 { font: 400 1.35rem/1.1 var(--display); margin: 0; }
+.vpanel h2 { font: 800 1.35rem/1.1 var(--display); letter-spacing: -0.01em; margin: 0; }
 .vhelp { margin: 0; color: var(--muted); font-size: 13px; text-wrap: pretty; }
 .vhelp strong { color: var(--ink); }
 .vedit { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -262,7 +270,8 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .vcolors input { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; flex: none; }
 .vstyle-save { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
 .vstyle-save .vname { width: 100%; min-width: 0; }
-.vtabs button { padding: 6px 4px; font-size: 12.5px; border-radius: 11px; }
+.vtabs button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 4px; font-size: 13px; border-radius: 11px; }
+.vtabs button svg { width: 15px; height: 15px; flex: none; }
 .vsub { font-weight: 600; font-size: 14px; }
 .vsliders { grid-template-columns: auto 1fr 2.5em; align-items: center; gap: 8px 10px; }
 .vsliders label { font-size: 13.5px; font-weight: 600; }
@@ -293,7 +302,7 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .vshapes button[aria-pressed="true"] { border-color: var(--accent); color: var(--ink); box-shadow: 0 0 0 1px var(--accent) inset; }
 .vshapes button[aria-pressed="true"] i { color: var(--accent); }
 #vFitSeg, #vRes, #vQuality { justify-self: start; }
-.vempty { position: absolute; inset: 0; display: grid; place-items: center; color: #A999AC; font-size: 15px; }
+.vempty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 15px; }
 .vtransport { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .vtransport .btn { min-width: 84px; }
 .vtime { margin-left: auto; font-size: 13.5px; color: var(--muted); }
@@ -328,7 +337,7 @@ kbd { font: 600 12px var(--mono); border: 1px solid var(--line); border-bottom-w
 .vid { display: grid; gap: 8px; }
 .vid .row { flex-wrap: wrap; }
 .vid select { flex: 1 1 140px; min-width: 0; }
-.vid-preview { display: grid; place-items: center; background: #120E17; border-radius: 10px; padding: 10px; }
+.vid-preview { display: grid; place-items: center; background: var(--sunk); border-radius: 10px; padding: 10px; }
 .vid-preview canvas { max-width: 100%; max-height: 260px; width: auto; height: auto; border-radius: 6px; }
 
 /* v3: session + phone */
@@ -391,16 +400,23 @@ img { max-width: 100%; }
 <div class="wrap">
   <header class="masthead">
     <div>
-      <h1><img class="mark" src="favicon.svg" alt=""><span>Hook<span class="d">d</span></span><span class="hi" lang="hi">हुक्ड</span></h1>
-      <p>Find the hook, drop the mashup. Blend the best parts of your songs into one track, or play them live like a DJ. You can also edit videos for LinkedIn, Reels and Shorts, with automatic captions, music and transitions.</p>
+      <h1><img class="mark" src="favicon.svg" alt=""><span>Hook<span class="d">d</span></span></h1>
+      <p class="hero">Mix the songs. <span>Cut the video.</span> Make it hit.</p>
+      <p>Blend the best parts of your favourite songs, play them live like a DJ, or edit videos with captions, chapters and music for Reels, Shorts and LinkedIn. Free, right in your browser, and never a watermark.</p>
     </div>
   </header>
 
   <div class="bar">
-    <div class="seg" role="group" aria-label="Mode">
-      <button type="button" id="modeBuild" aria-pressed="true">Build a mashup</button>
-      <button type="button" id="modeLive" aria-pressed="false">Live DJ</button>
-      <button type="button" id="modeVideo" aria-pressed="false">Edit a video</button>
+    <div class="modes" role="group" aria-label="Mode">
+      <button type="button" class="mode" id="modeBuild" aria-pressed="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+        <b>Build a mashup</b><span>Blend the best parts</span></button>
+      <button type="button" class="mode" id="modeLive" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>
+        <b>Live DJ</b><span>Tap pads, switch on the beat</span></button>
+      <button type="button" class="mode" id="modeVideo" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="M16.5 10l5-3v10l-5-3"/></svg>
+        <b>Edit a video</b><span>Captions, cuts, music, 4K</span></button>
     </div>
     <div class="vibe" id="vibeBar">
       <span class="label">Vibe</span>
@@ -475,7 +491,7 @@ img { max-width: 100%; }
       <ol class="order" id="order"></ol>
 
       <div class="transport">
-        <button type="button" class="btn primary" id="playMix" disabled>Play mashup</button>
+        <button type="button" class="btn primary" id="playMix" disabled>Play the mashup</button>
         <span class="time" id="mixTime"></span>
       </div>
 
@@ -557,15 +573,15 @@ img { max-width: 100%; }
       <aside class="vtools">
         <div class="vpanel vtools-main" id="vToolsPanel">
           <div class="seg vtabs" id="vTabs" role="group" aria-label="Tools">
-            <button type="button" data-tab="clips" aria-pressed="true">Clips</button>
-            <button type="button" data-tab="caps" aria-pressed="false">Captions</button>
-            <button type="button" data-tab="chap" aria-pressed="false">Chapters</button>
-            <button type="button" data-tab="style" aria-pressed="false">Style</button>
-            <button type="button" data-tab="trans" aria-pressed="false">Transitions</button>
-            <button type="button" data-tab="music" aria-pressed="false">Music</button>
-            <button type="button" data-tab="title" aria-pressed="false">Title</button>
-            <button type="button" data-tab="shape" aria-pressed="false">Shape</button>
-            <button type="button" data-tab="enh" aria-pressed="false">Enhance</button>
+            <button type="button" data-tab="clips" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M9 6v12M15 6v12"/></svg>Clips</button>
+            <button type="button" data-tab="caps" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 12h4M13 12h4M7 15.5h10"/></svg>Captions</button>
+            <button type="button" data-tab="chap" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v18M6 4h11l-2 4 2 4H6"/></svg>Chapters</button>
+            <button type="button" data-tab="style" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.8 2-1.8 0-.5-.2-.9-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1 .8-1.6 1.8-1.6H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="11" cy="7.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.2" fill="currentColor"/></svg>Style</button>
+            <button type="button" data-tab="trans" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="8" height="12" rx="1.5"/><rect x="13.5" y="6" width="8" height="12" rx="1.5"/><path d="M8 12h8M13.5 9.5 16 12l-2.5 2.5"/></svg>Transitions</button>
+            <button type="button" data-tab="music" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>Music</button>
+            <button type="button" data-tab="title" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>Title</button>
+            <button type="button" data-tab="shape" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M3 8v8M21 8v8"/></svg>Shape</button>
+            <button type="button" data-tab="enh" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg>Enhance</button>
           </div>
 
           <div class="vtab" data-panel="clips">

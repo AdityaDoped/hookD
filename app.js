@@ -1271,7 +1271,7 @@ function refreshMixPanel() {
   $("#vidBtn").disabled = !ok || exporting || !videoSupported;
   $("#autoBtn").disabled = !has;
   if (!(playing && playing.kind === "mix") && !busy) {
-    $("#playMix").textContent = mix.buffer && mix.key === mixKey() ? "Play mashup" : (has ? "Mix and play" : "Play mashup");
+    $("#playMix").textContent = "Play the mashup";
     $("#mPlay").textContent = "Play";
     $("#mixTime").textContent = has ? `${fmt(P.total, 0)} long` : "";
     $("#mTime").textContent = has ? (ok ? `${P.segs.length} songs · ${fmt(P.total, 0)}` : "Fix the cut marked in red") : "";
@@ -1903,7 +1903,7 @@ function setMode(m) {
   $("#buildView").hidden = m !== "build";
   $("#liveView").hidden = m !== "live";
   $("#videoView").hidden = m !== "video";
-  $("#vibeBar").hidden = m === "video";
+  $("#vibeBar").hidden = m !== "build";   // Live DJ has its own vibe switch
   if (m === "build" && playing && playing.kind === "live") stopAll();
   if (m === "live" && playing && playing.kind !== "live") stopAll();
   if (m === "video" && playing) stopAll();

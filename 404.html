@@ -6,17 +6,16 @@
 <meta name="robots" content="noindex">
 <title>Page not found · Hookd</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2316111B'/%3E%3Cpath d='M20 14v36M20 34c0-7 5-11 11-11s11 4 11 11v16' stroke='%23FF5C9A' stroke-width='7' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600&family=Yatra+One&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hind:wght@400;700&family=Yatra+One&display=swap">
 <style>
-:root { --bg: #FBF6F3; --ink: #241A2C; --muted: #6D6072; --accent: #C2185B; --accent-ink: #FFFFFF; --focus: #5E35B1; }
-@media (prefers-color-scheme: dark) {
-  :root { color-scheme: dark; --bg: #16111B; --ink: #F2EAF1; --muted: #A999AC; --accent: #FF5C9A; --accent-ink: #1A0A12; --focus: #B9A4FF; }
-}
-body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--ink); font: 400 16px/1.6 "Figtree", system-ui, sans-serif; text-align: center; padding: 24px 16px; box-sizing: border-box; }
-h1 { font: 400 clamp(3rem, 14vw, 5rem)/1 "Yatra One", Georgia, serif; margin: 0; }
+/* Sangeet Night, as on the main page */
+:root { color-scheme: dark; --bg: #240A1C; --glow: #4A1033; --ink: #FCEFE6; --muted: #D2A7B9; --accent: #FF4F9A; --gold: #FFB627; --btn: #D92D73; --btn-edge: #8E1450; --focus: #FFB627; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(110% 70% at 0% 0%, var(--glow) 0%, var(--bg) 60%) no-repeat, var(--bg); color: var(--ink); font: 400 16px/1.6 "Hind", system-ui, sans-serif; text-align: center; padding: 24px 16px; box-sizing: border-box; }
+h1 { font: 400 clamp(3rem, 14vw, 5rem)/1 "Yatra One", Georgia, serif; margin: 0; color: var(--gold); text-shadow: 0 3px 0 #9C2A00; }
 h1 span { color: var(--accent); }
 p { color: var(--muted); margin: 12px 0 24px; }
-a { display: inline-block; background: var(--accent); color: var(--accent-ink); font-weight: 600; text-decoration: none; padding: 10px 18px; border-radius: 10px; }
+a { display: inline-block; background: var(--btn); color: #fff; font-weight: 700; text-decoration: none; padding: 10px 20px; border-radius: 999px; box-shadow: 0 4px 0 var(--btn-edge); transition: transform .12s, box-shadow .12s; }
+a:hover { transform: translateY(-2px); box-shadow: 0 6px 0 var(--btn-edge); }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>
 </head>
