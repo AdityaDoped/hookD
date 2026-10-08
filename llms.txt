@@ -40,7 +40,7 @@ Tab buttons: Clips, Captions, Chapters, Style, Transitions, Music, Title, Shape,
 - **Title**: *Show a title at the start*, as a **Card** (a plain card that plays before the video and adds its length) or a **Cover** (a poster over the first seconds: the video shrinks into a white frame under the title box, then grows back to full screen; nothing is added to the length). A cover can have a picture above it (*Add a picture*). The second line suits a byline like "by Your Name". Below that is the **Series banner**: a bar across the top with the series name, shown as the video starts for 3, 5 or 8 seconds or for the whole video.
 - **Shape**: Same as video, Wide 16:9, Square 1:1, Portrait 4:5 or Vertical 9:16, with a blurred background or a crop to fill.
 - **Enhance**: background noise reduction, *Even out loudness* (brings the voice to the usual feed volume), and brightness, contrast, saturation and warmth.
-- **Export** (below the tabs): a file name and *Export MP4*. This needs Chrome or Edge on a computer. Keep the tab open while it runs.
+- **Export** (below the tabs): a file name, **Size** (*Up to 1080p* or *Up to 4K*; the video is never enlarged past its sharpest clip) and **Quality** (*Standard*, or *Best*: up to twice the video bitrate, capped at 60 Mbps, for less loss when apps re-compress it; sound is AAC 192 kbps either way), then *Export MP4*. The note under the button shows the size, frame rate (it follows the footage, so 60 fps stays 60) and the largest the file should get. Exports never carry a watermark. If the computer can't encode 4K, it saves at 1080p and says so. This needs Chrome or Edge on a computer. Keep the tab open while it runs.
 
 Keyboard (when not typing in a box): Space play/pause, S split, C add caption, Delete remove the selected clip or caption, Left/Right one frame (Shift for 1 second), Home/End, Ctrl+Z undo, Ctrl+Shift+Z redo.
 
@@ -55,6 +55,7 @@ hookd.video.seek(12.5)              // move the playhead (seconds)
 hookd.video.play(); hookd.video.pause()
 
 hookd.video.set({                   // change any settings; returns the new state
+  export: { res: "4k", quality: "best" },   // res: "1080" | "4k"; quality: "standard" | "best"
   shape: "vertical",                // "original" | "wide" | "square" | "portrait" | "vertical"
   fit: "fit",                       // "fit" (blurred background) | "fill" (crop)
   look: { theme: "playbook" },      // "playbook" | "midnight" | "sunny" | "clean"
@@ -90,7 +91,7 @@ hookd.video.removeClip(index)       // remove a clip (0 = first)
 hookd.video.undo(); hookd.video.redo()   // undo covers clip edits (split, trim, move, delete, transitions)
 ```
 
-`hookd.video.state()` returns: `duration`, `playhead`, `playing`, `exporting`, `fileName`, `output` (width, height), `clips` (index, video, start, end, sourceIn, sourceOut, transitionIn), `captions` (id, start, end, text), `chapters` (id, at, until, text, sub, icon, card, hold), `title`, `banner`, `look`, `captionStyle`, `shape`, `fit`, `music`, `enhance`, and the allowed `themes`, `icons` and the person's `savedStyles`.
+`hookd.video.state()` returns: `duration`, `playhead`, `playing`, `exporting`, `fileName`, `output` (width, height), `export` (res, quality), `clips` (index, video, start, end, sourceIn, sourceOut, transitionIn), `captions` (id, start, end, text), `chapters` (id, at, until, text, sub, icon, card, hold), `title`, `banner`, `look`, `captionStyle`, `shape`, `fit`, `music`, `enhance`, and the allowed `themes`, `icons` and the person's `savedStyles`.
 
 Not in the API on purpose: adding files, making automatic captions (press *Make captions automatically*; it can take a few minutes) and exporting.
 

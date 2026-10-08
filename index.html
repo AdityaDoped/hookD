@@ -289,7 +289,7 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .vshapes button i { display: block; height: 28px; max-width: 44px; border: 2px solid currentColor; border-radius: 3px; }
 .vshapes button[aria-pressed="true"] { border-color: var(--accent); color: var(--ink); box-shadow: 0 0 0 1px var(--accent) inset; }
 .vshapes button[aria-pressed="true"] i { color: var(--accent); }
-#vFitSeg { justify-self: start; }
+#vFitSeg, #vRes, #vQuality { justify-self: start; }
 .vempty { position: absolute; inset: 0; display: grid; place-items: center; color: #A999AC; font-size: 15px; }
 .vtransport { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .vtransport .btn { min-width: 84px; }
@@ -789,9 +789,20 @@ img { max-width: 100%; }
           <h2>Export</h2>
           <label class="label" for="vName">File name</label>
           <input id="vName" class="vname" placeholder="my-video" autocomplete="off">
+          <span class="label">Size</span>
+          <div class="seg" id="vRes" role="group" aria-label="Largest size">
+            <button type="button" data-res="1080" aria-pressed="true">Up to 1080p</button>
+            <button type="button" data-res="4k" aria-pressed="false">Up to 4K</button>
+          </div>
+          <span class="label">Quality</span>
+          <div class="seg" id="vQuality" role="group" aria-label="Quality">
+            <button type="button" data-q="standard" aria-pressed="true">Standard</button>
+            <button type="button" data-q="best" aria-pressed="false">Best</button>
+          </div>
+          <p class="vhelp">Best keeps more detail after Instagram or LinkedIn compress your video, in a file up to twice as big. Your video is never enlarged, so 4K only helps with 4K footage.</p>
           <button type="button" class="btn primary" id="vExport">Export MP4</button>
           <progress id="vProg" max="1" value="0" hidden></progress>
-          <small id="vNote">Exports at your video's own size, up to 1080p.</small>
+          <small id="vNote">Exports at your video's own size. No watermark.</small>
         </div>
       </aside>
       <div class="vstage">

@@ -20,6 +20,7 @@ const V = {
   // chapter headings, also in source time: { id, src, s, text, sub, icon, card, hold }
   chapters: [],
   look: null,    // colours and font of titles, banner, chapters and highlight captions (set below)
+  out: { res: "1080", quality: "standard" },   // export size limit and quality
   // voice and colour tools, all off until chosen
   enh: { noise: 0, level: false, bright: 0, contrast: 0, sat: 0, warm: 0 },
 };
@@ -780,16 +781,18 @@ function processVoices() {
 /* ---------- Picture: shared by the preview and the export ---------- */
 const SHAPES = { original: null, wide: [16, 9], square: [1, 1], portrait: [4, 5], vertical: [9, 16] };
 const even = x => Math.max(2, Math.round(x / 2) * 2);
-function outSize() {
-  const first = V.clips[0] && V.clips[0].src;
+// Largest export: 1080p, or 4K when chosen. Videos are never enlarged past the sharpest clip.
+const RES = { "1080": [1920, 1080], "4k": [3840, 2160] };
+function outSize(res = V.out.res) {
+  const first = V.clips[0] && V.clips[0].src, [maxL, maxS] = RES[res] || RES["1080"];
   if (!first) return [1280, 720];
   const r = SHAPES[V.shape];
   if (!r) {
-    const k = Math.min(1, 1920 / Math.max(first.w, first.h), 1080 / Math.min(first.w, first.h));
+    const k = Math.min(1, maxL / Math.max(first.w, first.h), maxS / Math.min(first.w, first.h));
     return [even(first.w * k), even(first.h * k)];
   }
   // the sharpest clip sets the size; at least 720 so feeds don't show a tiny video
-  const short = clamp(Math.max(...V.clips.map(c => Math.min(c.src.w, c.src.h))), 720, 1080);
+  const short = clamp(Math.max(...V.clips.map(c => Math.min(c.src.w, c.src.h))), 720, maxS);
   return r[0] >= r[1] ? [even(short * r[0] / r[1]), even(short)] : [even(short), even(short * r[1] / r[0])];
 }
 const blurCv = document.createElement("canvas"), blurG = blurCv.getContext("2d");
@@ -1585,7 +1588,7 @@ function setZoom(z, anchorT = V.T, anchorX = null) {
 
 /* ---------- Export ---------- */
 async function pickEncoder(W, H, fps, bitrate) {
-  for (const codec of ["avc1.640033", "avc1.64002a", "avc1.640028", "avc1.4d0033", "avc1.4d0028", "avc1.42e033", "avc1.42e028"]) {
+  for (const codec of ["avc1.640034", "avc1.640033", "avc1.64002a", "avc1.640028", "avc1.4d0033", "avc1.4d0028", "avc1.42e033", "avc1.42e028"]) {
     const cfg = { codec, width: W, height: H, bitrate, framerate: fps, avc: { format: "avc" }, latencyMode: "quality" };
     if (await VideoEncoder.isConfigSupported(cfg).then(r => r.supported, () => false)) return cfg;
   }
@@ -1659,6 +1662,18 @@ function audioBlock(P, sr, a, n) {
   for (let i = 0; i < n; i++) { data[i] = clamp(L[i], -1, 1); data[n + i] = clamp(R[i], -1, 1); }
   return data;
 }
+// The common frame rate closest to the first video's (so 60 fps footage stays 60).
+function exportFps() { const f = V.clips[0].src.fps; return [24, 25, 30, 50, 60].reduce((a, b) => Math.abs(b - f) < Math.abs(a - f) ? b : a); }
+// Bits per pixel: Standard looks right in a feed; Best leaves room for the apps to compress it again.
+// Best stops at 60 Mbps: asked for 80 at 4K, a laptop's hardware encoder dropped to about 9.
+function videoRate(W, H, fps) { const best = V.out.quality === "best"; return clamp(Math.round(W * H * fps * (best ? 0.28 : 0.14)), 2e6, best ? 60e6 : 40e6); }
+// What an export will be, for the panel: size, frame rate and at most how big the file gets
+// (simple pictures come out smaller).
+function exportSummary() {
+  const [W, H] = outSize(), fps = exportFps(), mb = (videoRate(W, H, fps) + 192e3) * vtotal() / 8 / 1e6;
+  const label = Math.min(W, H) >= 2160 ? "4K" : Math.min(W, H) >= 1440 ? "1440p" : Math.min(W, H) >= 1080 ? "1080p" : Math.min(W, H) + "p";
+  return `${W}×${H} (${label}), ${fps} fps, up to about ${mb >= 1000 ? (mb / 1000).toFixed(1) + " GB" : Math.max(1, Math.round(mb)) + " MB"}.`;
+}
 function exportName() { return ($("#vName").value.trim() || "my-video").replace(/[\\/:*?"<>|]+/g, "-"); }
 async function vExport() {
   if (V.exporting) { V.cancel = true; return; }
@@ -1682,12 +1697,15 @@ async function vExport() {
   try {
     // the cleaned-up sound must be ready before it's written out
     if (enhKey() !== "0:0") { $("#vNote").textContent = "Finishing the sound cleanup…"; await processVoices(); }
-    const P = vplan(), [W, H] = outSize(), s0 = V.clips[0].src;
-    const fps = [24, 25, 30, 50, 60].reduce((a, b) => Math.abs(b - s0.fps) < Math.abs(a - s0.fps) ? b : a);
-    const bitrate = clamp(Math.round(W * H * fps * 0.14), 2e6, 16e6);
-    const vcfg = await pickEncoder(W, H, fps, bitrate);
+    const P = vplan(), best = V.out.quality === "best", fps = exportFps(), rate = (W, H) => videoRate(W, H, fps);
+    let [W, H] = outSize(), vcfg = await pickEncoder(W, H, fps, rate(W, H)), fellBack = false;
+    if (!vcfg && V.out.res !== "1080") {
+      // some computers can't encode 4K; 1080p still works everywhere
+      [W, H] = outSize("1080"); vcfg = await pickEncoder(W, H, fps, rate(W, H)); fellBack = !!vcfg;
+    }
     if (!vcfg) throw new Error("this browser can't make MP4 video at this size. Try Chrome or Edge");
     const sr = audio().sampleRate;
+    // 192 kbps is the most Chrome's AAC encoder takes
     const acfg = { codec: "mp4a.40.2", sampleRate: sr, numberOfChannels: 2, bitrate: 192000 };
     if (!(await AudioEncoder.isConfigSupported(acfg).then(r => r.supported, () => false))) throw new Error("this browser can't make AAC sound. Try Chrome or Edge");
     const burn = V.capLook.burn && capsOnTimeline(P).length > 0;
@@ -1746,7 +1764,8 @@ async function vExport() {
     prog.value = 1;
     if (writable) { await writable.close(); writable = null; toast(`Saved ${name}`); }
     else await saveFile(new Blob([target.buffer], { type: "video/mp4" }), name);
-    vStatus(`Exported ${name}: ${W}×${H}, ${fps} fps, ${fmt(P.total, 0)} long.`);
+    vStatus(`Exported ${name}: ${W}×${H}, ${fps} fps, ${best ? "Best" : "Standard"} quality, ${fmt(P.total, 0)} long.` +
+      (fellBack ? " This computer can't make 4K video, so it was saved at 1080p." : ""));
   } catch (e) {
     if (writable) { try { await writable.abort(); } catch (_) {} }
     if (e && e.message === "cancelled") vStatus("Export cancelled.");
@@ -1756,7 +1775,7 @@ async function vExport() {
     try { if (venc && venc.state !== "closed") venc.close(); } catch (_) {}
     try { if (aenc && aenc.state !== "closed") aenc.close(); } catch (_) {}
     V.exporting = false; V.cancel = false;
-    prog.hidden = true; note.textContent = "Exports at your video's own size, up to 1080p.";
+    prog.hidden = true;
     updateUi();
   }
 }
@@ -1858,7 +1877,7 @@ function projectData() {
     clips: V.clips.map(c => ({ id: c.id, src: c.src.id, in: c.in, out: c.out, trans: c.trans || null })),
     caps: V.caps.map(k => ({ id: k.id, src: k.src.id, s: k.s, e: k.e, text: k.text })),
     chapters: V.chapters.map(c => ({ ...c, src: c.src.id })),
-    title: V.title, banner: V.banner, look: V.look, shape: V.shape, fit: V.fit, capLook: V.capLook, enh: V.enh,
+    title: V.title, banner: V.banner, look: V.look, out: V.out, shape: V.shape, fit: V.fit, capLook: V.capLook, enh: V.enh,
     music: V.music ? { name: V.music.name, vol: V.music.vol, duck: V.music.duck } : null,
     cover: V.cover ? { name: V.cover.name } : null,
   };
@@ -1891,7 +1910,7 @@ async function vRestore() {
   V.caps = (p.caps || []).filter(k => byId.has(k.src)).map(k => ({ ...k, src: byId.get(k.src) }));
   V.chapters = (p.chapters || []).filter(c => byId.has(c.src)).map(c => ({ ...c, src: byId.get(c.src) }));
   Object.assign(V.title, p.title || {}); Object.assign(V.capLook, p.capLook || {}); Object.assign(V.enh, p.enh || {});
-  Object.assign(V.banner, p.banner || {}); if (p.look) V.look = { ...V.look, ...p.look };
+  Object.assign(V.banner, p.banner || {}); Object.assign(V.out, p.out || {}); if (p.look) V.look = { ...V.look, ...p.look };
   if (p.cover) {
     try { const f = await vstore.getFile("cover"); V.cover = { name: p.cover.name, bmp: await createImageBitmap(f) }; } catch (e) { failed++; }
   }
@@ -2340,7 +2359,14 @@ function updateUi() {
   document.querySelectorAll("#vFitSeg [data-fit]").forEach(b => b.setAttribute("aria-pressed", b.dataset.fit === V.fit));
   const [W, H] = outSize();
   $("#vShapeOut").textContent = has ? `Exports at ${W}×${H}.` : "";
-  if (!busy) $("#vNote").textContent = has ? `Exports an MP4 at ${W}×${H}.` : "Exports at your video's own size, up to 1080p.";
+  document.querySelectorAll("#vRes [data-res]").forEach(b => b.setAttribute("aria-pressed", b.dataset.res === V.out.res));
+  document.querySelectorAll("#vQuality [data-q]").forEach(b => b.setAttribute("aria-pressed", b.dataset.q === V.out.quality));
+  if (!busy) {
+    // say so when 4K is chosen but the footage isn't sharper than 1080p
+    const small = has && V.out.res === "4k" && Math.min(W, H) <= 1080;
+    $("#vNote").textContent = !has ? "Exports at your video's own size. No watermark." :
+      exportSummary() + (small ? " Your videos aren't sharper than this, so 4K wouldn't add detail." : "");
+  }
   ["#vTitleText", "#vTitleSub", "#vTitleDur"].forEach(s => ($(s).disabled = !V.title.on));
   document.querySelectorAll("#vTitleStyle [data-tstyle]").forEach(b => { b.setAttribute("aria-pressed", b.dataset.tstyle === V.title.style); b.disabled = !V.title.on; });
   const isCover = V.title.style === "cover";
@@ -2464,6 +2490,9 @@ $("#vChapLayout").addEventListener("click", e => {
   if (x) vSeek(x.t0 + Math.min(0.8, x.ch.card * 0.6)); else vtick();
 });
 $("#vStyleSave").addEventListener("click", saveStyle);
+// export size and quality
+$("#vRes").addEventListener("click", e => { const b = e.target.closest("[data-res]"); if (b && !V.exporting) { V.out.res = b.dataset.res; settingsChanged(); } });
+$("#vQuality").addEventListener("click", e => { const b = e.target.closest("[data-q]"); if (b && !V.exporting) { V.out.quality = b.dataset.q; updateUi(); vSave(); } });
 $("#vStyleName").addEventListener("keydown", e => { if (e.key === "Enter") saveStyle(); });
 // shape
 $("#vShapes").addEventListener("click", e => { const b = e.target.closest("[data-shape]"); if (b) { V.shape = b.dataset.shape; settingsChanged(); } });
@@ -2547,7 +2576,7 @@ window.hookd = {
       const P = vplan();
       return {
         mode: state.mode, duration: +P.total.toFixed(3), playhead: +V.T.toFixed(3), playing: V.playing, exporting: V.exporting, fileName: $("#vName").value,
-        output: (([w, h]) => ({ width: w, height: h }))(outSize()),
+        output: (([w, h]) => ({ width: w, height: h }))(outSize()), export: { ...V.out },
         clips: P.items.filter(it => it.kind === "clip").map(it => ({ index: it.ci, video: it.c.src.name, start: +it.start.toFixed(3), end: +it.end.toFixed(3),
           sourceIn: +it.c.in.toFixed(3), sourceOut: +it.c.out.toFixed(3), transitionIn: it.ci > 0 ? (it.c.trans || { type: "cut" }) : null })),
         captions: capsOnTimeline(P).map(x => ({ id: x.cap.id, start: +x.t0.toFixed(3), end: +x.t1.toFixed(3), text: x.cap.text })),
@@ -2598,6 +2627,10 @@ window.hookd = {
         if (c.size != null) V.capLook.size = oneOf(c.size, ["s", "m", "l"], "captionStyle.size");
         if (c.pos != null) V.capLook.pos = oneOf(c.pos, ["bottom", "middle"], "captionStyle.pos");
         if (c.burn != null) V.capLook.burn = !!c.burn;
+      }
+      if (p.export) {
+        if (p.export.res != null) V.out.res = oneOf(p.export.res, Object.keys(RES), "export.res");
+        if (p.export.quality != null) V.out.quality = oneOf(p.export.quality, ["standard", "best"], "export.quality");
       }
       if (p.shape != null) V.shape = oneOf(p.shape, Object.keys(SHAPES), "shape");
       if (p.fit != null) V.fit = oneOf(p.fit, ["fit", "fill"], "fit");
