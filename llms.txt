@@ -1,0 +1,129 @@
+# Hookd
+
+> Hookd (https://hookd-sage.vercel.app) is a free, browser-only mashup maker and video editor. Everything runs on the person's own device: their songs and videos are never uploaded. This guide is for AI assistants (Claude, ChatGPT, Gemini and others) that help someone use Hookd, especially assistants that can see or drive their browser, such as Claude in Chrome.
+
+## How to help well
+
+- The person's files stay on their computer. You can't add files for them: ask them to click the button (or drop files on the page), then carry on.
+- Exporting asks the browser where to save, so the person must click **Export MP4** themselves. Tell them when everything is ready.
+- Never upload, paste or describe their video anywhere else.
+- Prefer the `window.hookd` API below over clicking: it is exact and reports clear errors. Clicking works too; every control is listed further down.
+- After changing something, check it: call `hookd.video.state()`, or seek to the moment and look at the preview.
+- Explain in plain words what you changed. Many users are new to editing.
+
+## The three modes
+
+Switch with the buttons at the top: **Build a mashup**, **Live DJ**, **Edit a video**. The video editor is the one most people need help with.
+
+1. **Build a mashup**: drop in songs, drag across each waveform to pick the best part (or press *Find the hook*), choose transitions in *Your mix*, then *Download audio* or *Download video*. *Auto mashup* picks the hooks, the order and the transitions.
+2. **Live DJ**: each song becomes a pad; tap pads (or press 1 to 9) to switch songs on the beat.
+3. **Edit a video**: cut and join MP4/MOV videos, add captions, chapters, a title, a banner, music and transitions, then export an MP4.
+
+## Video editor: the main ideas
+
+- **Timeline time vs. video time.** Times in the API and on screen (the clock under the preview) are seconds on the *edited* video's timeline, starting at 0.
+- **Captions and chapters are pinned to a moment in the original video.** If you cut or move clips, they move with their words. Lip sync is never affected: picture and sound are always cut at the same instant.
+- **Clips** are pieces of the added videos, played in order. Splitting a clip makes two clips; deleting a clip removes that piece.
+- **The style** (colours and font) is shared by the title, the banner, the chapters and the Highlight captions.
+- The project saves itself in this browser. A reload picks up where they left off.
+
+## Video editor: the tabs (left panel)
+
+Tab buttons: Clips, Captions, Chapters, Style, Transitions, Music, Title, Shape, Enhance.
+
+- **Clips**: *Add videos* (`#vAdd`). *Split* (`#vSplit`, key S) at the playhead, *Delete* (`#vDelete`) the selected clip, *Undo* and *Redo*. Drag a clip's edge on the timeline to trim it; drag a clip to move it. *Start over* clears the project but keeps the style.
+- **Captions**: *Make captions automatically* (speech recognition that runs on the device; the first run downloads a model of 80 or 250 MB). Then: *Add caption* (key C), *Import .srt*, an editable list, and the look: *Subtitle bar*, *Bold words* (the word being said turns gold) or *Highlight* (each line on a coloured box, with the word being said underlined). Choose a size (S/M/L), Bottom or Middle, *Show captions in the exported video*, and *Save captions as .srt*.
+- **Chapters**: *Add chapter at the playhead*. Each chapter has a heading, an optional second line, a picture (rising chart, light bulb, checklist, target, star, speech bubble or none), a full-screen card of 0, 1, 1.5, 2 or 3 seconds, and then the heading stays pinned to the top for 2, 4, 6 or 10 seconds. The voice keeps playing under the card. Use chapters for "Step 1", "Step 2" and so on.
+- **Style**: pick *Playbook* (cream, charcoal, blue pictures, lime caption highlight, Lato, capitals), *Midnight*, *Sunny* or *Clean*, or a saved style. Change any colour (Background, Text, Pictures, Caption highlight, Caption text), the font (Lato, Figtree, Poppins, Playfair) and *Headings in capitals*. *Save style* stores the colours, font, caption look, banner and title style under a name in this browser, so every video in a series matches.
+- **Transitions**: click a ◆ between two clips on the timeline, then choose Cut, Crossfade, Fade through black, Quick zoom or *Slide in panels* (the next clip slides in as three bands), in short, medium or long. *Use this for every cut* applies it everywhere.
+- **Music**: add a song that plays under the video, set its volume, and tick *Lower the music while I talk*.
+- **Title**: *Show a title at the start*, as a **Card** (a plain card that plays before the video and adds its length) or a **Cover** (a poster over the first seconds: the video shrinks into a white frame under the title box, then grows back to full screen; nothing is added to the length). A cover can have a picture above it (*Add a picture*). The second line suits a byline like "by Your Name". Below that is the **Series banner**: a bar across the top with the series name, shown as the video starts for 3, 5 or 8 seconds or for the whole video.
+- **Shape**: Same as video, Wide 16:9, Square 1:1, Portrait 4:5 or Vertical 9:16, with a blurred background or a crop to fill.
+- **Enhance**: background noise reduction, *Even out loudness* (brings the voice to the usual feed volume), and brightness, contrast, saturation and warmth.
+- **Export** (below the tabs): a file name and *Export MP4*. This needs Chrome or Edge on a computer. Keep the tab open while it runs.
+
+Keyboard (when not typing in a box): Space play/pause, S split, C add caption, Delete remove the selected clip or caption, Left/Right one frame (Shift for 1 second), Home/End, Ctrl+Z undo, Ctrl+Shift+Z redo.
+
+## The `window.hookd` API
+
+Available on the page as soon as it loads. Run it in the page (for example with a JavaScript tool in the browser). Everything is synchronous unless noted. Invalid values throw an `Error` that says what is allowed.
+
+```js
+hookd.mode("video")                 // switch mode: "build" | "live" | "video"
+hookd.video.state()                 // everything about the edit (see below)
+hookd.video.seek(12.5)              // move the playhead (seconds)
+hookd.video.play(); hookd.video.pause()
+
+hookd.video.set({                   // change any settings; returns the new state
+  shape: "vertical",                // "original" | "wide" | "square" | "portrait" | "vertical"
+  fit: "fit",                       // "fit" (blurred background) | "fill" (crop)
+  look: { theme: "playbook" },      // "playbook" | "midnight" | "sunny" | "clean"
+  // or look: { savedStyle: "Finance Playbook" }
+  // or individual parts: { bg: "#FBF7EA", ink: "#1F1F1F", accent: "#2F6DB5",
+  //    hiBox: "#D9FF3F", hiInk: "#111111", font: "lato" | "figtree" | "poppins" | "serif", caps: true }
+  captionStyle: { style: "box", size: "m", pos: "bottom", burn: true },
+  //    style: "bar" | "bold" | "box" (Highlight); size: "s" | "m" | "l"; pos: "bottom" | "middle"
+  title: { on: true, style: "cover", text: "Lesson 1: Getting started", sub: "by Your Name", dur: 3 },
+  //    style: "card" | "cover"; dur: 2 | 3 | 4 | 5
+  banner: { on: true, text: "Finance Playbook", dur: 5 },   // dur: 3 | 5 | 8 | 0 (whole video)
+  transition: { into: 1, type: "panels", dur: 0.6 },
+  //    into: index of the clip it leads into (1 = between the first and second clip)
+  //    type: "cut" | "crossfade" | "black" | "zoom" | "panels"; dur: 0.3 | 0.6 | 1
+  music: { volume: 0.25, duck: true },                      // only when music was added
+  enhance: { noise: 2, level: true, bright: 0, contrast: 5, sat: 0, warm: 10 },
+  //    noise: 0-3; colour values -50 to 50
+})
+
+hookd.video.addChapter({ at: 26, text: "What to target", sub: "in finance?", icon: "chart", card: 1.5, hold: 4 })  // returns its id
+//    icon: "chart" | "bulb" | "list" | "target" | "star" | "chat" | "none"
+//    card: 0 | 1 | 1.5 | 2 | 3   hold: 2 | 4 | 6 | 10
+hookd.video.updateChapter(id, { text: "Start with your background" })
+hookd.video.removeChapter(id)
+
+hookd.video.addCaption({ at: 3.5, end: 6, text: "Hi everyone," })   // returns its id
+hookd.video.editCaption(id, "Hi everyone!")
+hookd.video.removeCaption(id)
+
+hookd.video.split(14.2)             // split the clip at that time
+hookd.video.removeClip(index)       // remove a clip (0 = first)
+hookd.video.undo(); hookd.video.redo()   // undo covers clip edits (split, trim, move, delete, transitions)
+```
+
+`hookd.video.state()` returns: `duration`, `playhead`, `playing`, `exporting`, `fileName`, `output` (width, height), `clips` (index, video, start, end, sourceIn, sourceOut, transitionIn), `captions` (id, start, end, text), `chapters` (id, at, until, text, sub, icon, card, hold), `title`, `banner`, `look`, `captionStyle`, `shape`, `fit`, `music`, `enhance`, and the allowed `themes`, `icons` and the person's `savedStyles`.
+
+Not in the API on purpose: adding files, making automatic captions (press *Make captions automatically*; it can take a few minutes) and exporting.
+
+## Recipes
+
+**A LinkedIn lesson in the "Playbook" look** (vertical, cream cover, series banner, lime captions, chapter cards):
+
+1. Ask the person to add their videos and, if they want, press *Make captions automatically*.
+2. Set the look:
+   ```js
+   hookd.video.set({ shape: "vertical", look: { theme: "playbook" }, captionStyle: { style: "box", size: "m" },
+     title: { on: true, style: "cover", text: "Lesson 1: Getting started", sub: "by Your Name", dur: 3 },
+     banner: { on: true, text: "Finance Playbook", dur: 5 } })
+   ```
+3. Find where each step starts from `state().captions` (for example "So let's start with step number one") and add a chapter there:
+   ```js
+   hookd.video.addChapter({ at: 26.1, text: "What to target", sub: "in finance?", icon: "chart" })
+   ```
+4. Read the captions back to the person and fix wrong words with `editCaption`.
+5. Suggest saving the style (Style tab, *Save style*), so the next video in the series matches in one click.
+6. Ask them to press *Export MP4*.
+
+**Fix a caption word everywhere**: loop over `state().captions`, replace the word in each `text`, and call `editCaption` for the ones that changed.
+
+**Cut out a mistake from 12.0 s to 15.5 s**: `split(15.5)`, `split(12.0)`, then find the clip whose `start` is 12.0 in `state().clips` and `removeClip(index)`.
+
+## Limits
+
+- Video editing reads MP4 and MOV. HEVC (some iPhone videos) only opens where the browser supports it; on iPhone, Settings > Camera > Formats > Most Compatible avoids it.
+- Export needs Chrome or Edge on a computer (WebCodecs).
+- Saved projects and styles live in this browser only.
+- Only use music and pictures the person has the right to use.
+
+## More
+
+- Privacy, terms and copyright: https://hookd-sage.vercel.app/legal
+- Questions and bug reports: GitHub Issues, linked from the legal page.

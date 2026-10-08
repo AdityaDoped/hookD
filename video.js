@@ -9,14 +9,30 @@
 const V = {
   sources: [], clips: [], sel: -1, selJoin: -1, T: 0, playing: false,
   undo: [], redo: [], zoom: 1, exporting: false, cancel: false, nextId: 1, version: 0,
-  title: { on: false, text: "", sub: "", dur: 3 },
+  // style "card" plays before the video; "cover" lays a poster over the opening seconds
+  title: { on: false, text: "", sub: "", dur: 3, style: "card" },
+  cover: null,   // { name, bmp }: the picture on a cover title
+  banner: { on: false, text: "", dur: 5 },   // dur 0 = the whole video
   shape: "original", fit: "fit",
   music: null,   // { name, buffer, vol, duck }
   // captions live in source time ({ id, src, s, e, text }), so cuts and moves carry them along
   caps: [], selCap: null, capLook: { style: "bar", size: "m", pos: "bottom", burn: true },
+  // chapter headings, also in source time: { id, src, s, text, sub, icon, card, hold }
+  chapters: [],
+  look: null,    // colours and font of titles, banner, chapters and highlight captions (set below)
   // voice and colour tools, all off until chosen
   enh: { noise: 0, level: false, bright: 0, contrast: 0, sat: 0, warm: 0 },
 };
+// Ready-made looks; every colour and the font can be changed afterwards.
+const THEMES = {
+  playbook: { name: "Playbook", bg: "#FBF7EA", ink: "#1F1F1F", accent: "#2F6DB5", hiBox: "#D9FF3F", hiInk: "#111111", font: "lato", caps: true },
+  midnight: { name: "Midnight", bg: "#16111B", ink: "#F2EAF1", accent: "#FF5C9A", hiBox: "#FF5C9A", hiInk: "#FFFFFF", font: "figtree", caps: false },
+  sunny: { name: "Sunny", bg: "#FFD84D", ink: "#1A1A1A", accent: "#1A1A1A", hiBox: "#1A1A1A", hiInk: "#FFD84D", font: "poppins", caps: true },
+  clean: { name: "Clean", bg: "#FFFFFF", ink: "#111827", accent: "#2563EB", hiBox: "#FFFFFF", hiInk: "#111827", font: "figtree", caps: false },
+};
+const FONTS = { lato: "Lato", figtree: "Figtree", poppins: "Poppins", serif: "Playfair Display" };
+const lookOf = id => { const { name, ...l } = THEMES[id]; return { theme: id, ...l }; };
+V.look = lookOf("midnight");   // matches the title card from before themes existed
 const MIN_CLIP = 0.1;     // shortest piece a split or trim may leave, in seconds
 const PEAKS_PER_SEC = 100;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -287,19 +303,21 @@ async function openSource(file) {
    timeline and the transition into it. A crossfade overlaps two clips; fade
    through black and quick zoom happen half before and half after the cut. */
 const clipLen = c => c.out - c.in;
-const TRANS = { cut: "Cut", crossfade: "Crossfade", black: "Fade through black", zoom: "Quick zoom" };
+const TRANS = { cut: "Cut", crossfade: "Crossfade", black: "Fade through black", zoom: "Quick zoom", panels: "Slide in panels" };
+const OVERLAP = { crossfade: true, panels: true };   // the next clip arrives over the last one
 const MICRO = 0.006;    // tiny fade at every cut so the sound never clicks
 const TITLE_TRANS = { type: "black", dur: 0.8 };
+const titleCard = () => V.title.on && V.title.style !== "cover";
 function vplan() {
   const items = [];
-  if (V.title.on) items.push({ kind: "title", len: V.title.dur, ci: -1 });
+  if (titleCard()) items.push({ kind: "title", len: V.title.dur, ci: -1 });
   V.clips.forEach((c, ci) => items.push({ kind: "clip", c, ci, len: clipLen(c) }));
   let t = 0;
   items.forEach((it, i) => {
     const prev = items[i - 1];
     const tr = !prev ? null : prev.kind === "title" ? TITLE_TRANS : (it.c.trans || null);
     const type = tr ? tr.type : "cut", dur = tr ? tr.dur : 0;
-    const ov = prev && type === "crossfade" ? Math.min(dur, prev.len / 2, it.len / 2) : 0;
+    const ov = prev && OVERLAP[type] ? Math.min(dur, prev.len / 2, it.len / 2) : 0;
     const h = prev && (type === "black" || type === "zoom") ? Math.min(dur / 2, prev.len / 2, it.len / 2) : 0;
     it.inT = prev ? { type, ov, h } : null;
     if (prev) prev.outT = it.inT;
@@ -330,13 +348,13 @@ function layersAt(P, t) {
   for (const it of P.items) {
     if (t < it.start || t >= it.end) continue;
     const a = t - it.start, b = it.end - t, I = it.inT, O = it.outT;
-    let alpha = 1, scale = 1;
-    if (I && I.ov && a < I.ov) alpha = a / I.ov;
+    let alpha = 1, scale = 1, panels = null;
+    if (I && I.ov && a < I.ov) { if (I.type === "panels") panels = a / I.ov; else alpha = a / I.ov; }
     if (I && I.type === "black" && a < I.h) black = Math.max(black, 1 - a / I.h);
     if (O && O.type === "black" && b < O.h) black = Math.max(black, 1 - b / O.h);
     if (I && I.type === "zoom" && a < I.h) { const p = 1 - a / I.h; scale *= 1 + 0.35 * p * p; }
     if (O && O.type === "zoom" && b < O.h) { const p = 1 - b / O.h; scale *= 1 + 0.35 * p * p; }
-    layers.push({ it, alpha, scale, src: it.kind === "clip" ? clamp(it.c.in + a, it.c.in, it.c.out - 0.001) : 0 });
+    layers.push({ it, alpha, scale, panels, src: it.kind === "clip" ? clamp(it.c.in + a, it.c.in, it.c.out - 0.001) : 0 });
   }
   if (!layers.length && P.items.length && t >= P.total) {
     const it = P.items.at(-1);
@@ -416,6 +434,43 @@ function capAt(P, t) {
   for (const x of capsOnTimeline(P)) { if (x.t0 > t) break; if (t < x.t1 && x.cap.text.trim()) hitCap = x; }
   return hitCap;
 }
+/* ---------- Chapters ----------
+   A chapter starts at a moment in a video (so cuts carry it along, like captions):
+   an optional full-screen card for `card` seconds, then its heading stays pinned to
+   the top for `hold` more. The sound carries on underneath, so lip sync is untouched. */
+const ICONS = { chart: "Rising chart", bulb: "Light bulb", list: "Checklist", target: "Target", star: "Star", chat: "Speech bubble", none: "No picture" };
+let chapCache = { key: "", list: [] };
+function chaptersOnTimeline(P) {
+  if (chapCache.key === String(V.version)) return chapCache.list;
+  const list = [];
+  for (const it of P.items) {
+    if (it.kind !== "clip") continue;
+    for (const ch of V.chapters) {
+      if (ch.src !== it.c.src || ch.s < it.c.in || ch.s >= it.c.out) continue;
+      const t0 = it.start + ch.s - it.c.in;
+      list.push({ ch, t0, t1: Math.min(P.total, t0 + ch.card + ch.hold) });
+    }
+  }
+  list.sort((a, b) => a.t0 - b.t0);
+  // a heading gives way when the next chapter starts
+  list.forEach((x, i) => { if (list[i + 1]) x.t1 = Math.min(x.t1, list[i + 1].t0); });
+  chapCache = { key: String(V.version), list };
+  return list;
+}
+function chapterAt(P, t) {
+  let hitCh = null;
+  for (const x of chaptersOnTimeline(P)) { if (x.t0 > t) break; if (t < x.t1) hitCh = x; }
+  return hitCh;
+}
+// When the series banner shows: from the start of the video (after a title card).
+function bannerSpan(P) {
+  if (!V.banner.on || !V.banner.text.trim() || !P.items.length) return null;
+  const first = P.items.find(it => it.kind === "clip");
+  if (!first) return null;
+  const t0 = first.start + (first.inT ? first.inT.ov + first.inT.h : 0);
+  return { t0, t1: V.banner.dur ? Math.min(P.total, t0 + V.banner.dur) : P.total };
+}
+
 // Long lines from speech recognition become several short captions, timed by length.
 const CAP_MAX = 64;   // characters: about two lines on a phone
 function splitCaption(s, e, text) {
@@ -451,12 +506,33 @@ function wordTimes(cap) {
   let t = cap.s;
   return words.map((w, i) => { const d = (cap.e - cap.s) * weight[i] / sum, out = { w, s: t, e: t + d }; t += d; return out; });
 }
-const CAP_SIZE = { bar: { s: 0.04, m: 0.05, l: 0.062 }, bold: { s: 0.062, m: 0.078, l: 0.095 } };
+const CAP_SIZE = { bar: { s: 0.04, m: 0.05, l: 0.062 }, bold: { s: 0.062, m: 0.078, l: 0.095 }, box: { s: 0.036, m: 0.045, l: 0.056 } };
 function drawCaption(g, W, H, x, t) {
   const L = V.capLook, u = Math.min(W, H), fs = Math.round(u * CAP_SIZE[L.style][L.size]);
   const cy = L.pos === "middle" ? H * 0.55 : H * (H > W ? 0.76 : 0.84);
   g.save(); g.globalAlpha = 1; g.textAlign = "center"; g.textBaseline = "middle";
-  if (L.style === "bar") {
+  if (L.style === "box") {
+    // each line on its own highlight, the word being said underlined
+    const k = V.look, st = x.it.c.in + (t - x.it.start), words = wordTimes(x.cap);
+    let cur = words.findIndex(w => st < w.e); if (cur < 0) cur = words.length - 1;
+    g.font = `700 ${fs}px ${fontStack(k.font)}`;
+    const space = g.measureText(" ").width, widths = words.map(w => g.measureText(w.w).width), rows = [[]];
+    let rw = 0;
+    words.forEach((w, i) => { if (rows.at(-1).length && rw + space + widths[i] > W * 0.84) { rows.push([]); rw = 0; } rows.at(-1).push(i); rw += (rows.at(-1).length > 1 ? space : 0) + widths[i]; });
+    const lh = fs * 1.32, padX = fs * 0.3, boxH = fs * 1.28;
+    g.textAlign = "left";
+    rows.forEach((row, r) => {
+      const total = row.reduce((a, i) => a + widths[i], 0) + space * (row.length - 1), yy = cy - (rows.length - 1) * lh / 2 + r * lh;
+      let xx = W / 2 - total / 2;
+      g.fillStyle = k.hiBox; g.fillRect(xx - padX, yy - boxH / 2, total + padX * 2, boxH);
+      g.fillStyle = k.hiInk;
+      for (const i of row) {
+        g.fillText(words[i].w, xx, yy);
+        if (i === cur) g.fillRect(xx, yy + fs * 0.5, widths[i], Math.max(1.5, fs * 0.08));
+        xx += widths[i] + space;
+      }
+    });
+  } else if (L.style === "bar") {
     g.font = `600 ${fs}px Figtree, system-ui, sans-serif`;
     const lines = wrapLines(g, x.cap.text.trim(), W * 0.84), lh = fs * 1.3, pad = fs * 0.45;
     const w = Math.max(...lines.map(l => g.measureText(l).width)) + pad * 2, h = lines.length * lh + pad * 0.8;
@@ -721,13 +797,13 @@ function drawRotated(g, img, iw, ih, rot, cx, cy, k) {
   g.drawImage(img, -iw * k / 2, -ih * k / 2, iw * k, ih * k);
   g.restore();
 }
-function drawMedia(g, W, H, m, scale, alpha) {
+function drawMedia(g, W, H, m, scale, alpha, fill = V.fit === "fill") {
   const turned = m.rot % 180 !== 0, dw = turned ? m.h : m.w, dh = turned ? m.w : m.h;
   if (!dw || !dh) return;
   const fit = Math.min(W / dw, H / dh), cover = Math.max(W / dw, H / dh);
   g.save(); g.globalAlpha = alpha;
   g.filter = colourFilter();
-  if (V.fit === "fit" && (dw * fit < W - 2 || dh * fit < H - 2)) {
+  if (!fill && (dw * fit < W - 2 || dh * fit < H - 2)) {
     // the bars show a blurred, darkened copy of the same picture
     const bw = 72, bh = Math.max(1, Math.round(72 * H / W));
     if (blurCv.width !== bw || blurCv.height !== bh) { blurCv.width = bw; blurCv.height = bh; }
@@ -737,7 +813,7 @@ function drawMedia(g, W, H, m, scale, alpha) {
     g.drawImage(blurCv, 0, 0, W, H);
     g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(0, 0, W, H);
   }
-  drawRotated(g, m.img, m.w, m.h, m.rot, W / 2, H / 2, (V.fit === "fill" ? cover : fit) * scale);
+  drawRotated(g, m.img, m.w, m.h, m.rot, W / 2, H / 2, (fill ? cover : fit) * scale);
   // warmth: a soft orange (or blue) wash over the picture
   if (V.enh.warm) {
     g.filter = "none"; g.globalCompositeOperation = "soft-light";
@@ -751,30 +827,180 @@ function colourFilter() {
   if (!e.bright && !e.contrast && !e.sat) return "none";
   return `brightness(${1 + e.bright / 100}) contrast(${1 + e.contrast / 100}) saturate(${1 + e.sat / 100})`;
 }
+// Fonts the picture needs, loaded before drawing so export never falls back to another font.
+function loadFonts() {
+  const fam = `"${FONTS[V.look.font] || "Figtree"}"`;
+  return Promise.all([`400 20px ${fam}`, `700 20px ${fam}`, `900 20px ${fam}`, "500 20px Figtree", "600 20px Figtree", "700 20px Figtree", "800 20px Figtree"]
+    .map(f => document.fonts.load(f).catch(() => {})));
+}
+const fontStack = f =>`"${FONTS[f] || "Figtree"}", Figtree, system-ui, sans-serif`;
+const headText = s => (V.look.caps ? s.toUpperCase() : s);
+const ease = p => 1 - Math.pow(1 - clamp(p, 0, 1), 3);
+// Font size that fits the text in maxW, starting from fs.
+function fitFont(g, text, weight, fs, maxW) {
+  g.font = `${weight} ${fs}px ${fontStack(V.look.font)}`;
+  const w = g.measureText(text).width;
+  if (w > maxW) { fs = Math.max(8, Math.floor(fs * maxW / w)); g.font = `${weight} ${fs}px ${fontStack(V.look.font)}`; }
+  return fs;
+}
 function drawTitle(g, W, H, alpha) {
-  const u = Math.min(W, H), fs = Math.round(u * 0.085), sfs = Math.round(u * 0.042), lh = fs * 1.15;
+  const k = V.look, u = Math.min(W, H), fs = Math.round(u * 0.085), sfs = Math.round(u * 0.042), lh = fs * 1.15;
   g.save(); g.globalAlpha = alpha;
-  g.fillStyle = "#16111B"; g.fillRect(0, 0, W, H);
+  g.fillStyle = k.bg; g.fillRect(0, 0, W, H);
   g.textAlign = "center"; g.textBaseline = "alphabetic";
-  g.font = `700 ${fs}px Figtree, system-ui, sans-serif`;
-  const lines = wrapLines(g, V.title.text.trim() || "Your title here", W * 0.84), sub = V.title.sub.trim();
+  g.font = `700 ${fs}px ${fontStack(k.font)}`;
+  const lines = wrapLines(g, headText(V.title.text.trim() || "Your title here"), W * 0.84), sub = V.title.sub.trim();
   const blockH = (lines.length - 1) * lh + fs * 0.75 + fs * 0.5 + Math.max(3, u * 0.008) + (sub ? sfs * 1.7 : 0);
   let y = H / 2 - blockH / 2 + fs * 0.75;
-  g.fillStyle = "#F2EAF1";
+  g.fillStyle = k.ink;
   lines.forEach((l, i) => g.fillText(l, W / 2, y + i * lh));
   const barY = y + (lines.length - 1) * lh + fs * 0.5;
-  g.fillStyle = "#FF5C9A"; g.fillRect(W / 2 - u * 0.06, barY, u * 0.12, Math.max(3, u * 0.008));
-  if (sub) { g.font = `500 ${sfs}px Figtree, system-ui, sans-serif`; g.fillStyle = "#C9BAC6"; g.fillText(sub, W / 2, barY + sfs * 1.7); }
+  g.fillStyle = k.accent; g.fillRect(W / 2 - u * 0.06, barY, u * 0.12, Math.max(3, u * 0.008));
+  if (sub) { g.font = `500 ${sfs}px ${fontStack(k.font)}`; g.fillStyle = k.ink; g.globalAlpha = alpha * 0.75; g.fillText(sub, W / 2, barY + sfs * 1.7); }
   g.restore();
+}
+// The heading bar across the top: a bold line and an optional lighter one.
+// p (0 to 1) wipes it in from the left.
+function drawTopBar(g, W, H, line1, line2, p, alpha) {
+  const k = V.look, u = Math.min(W, H), two = !!line2;
+  const fs1 = Math.round(u * 0.052), fs2 = Math.round(u * 0.048);
+  const bh = two ? fs1 * 1.35 + fs2 * 1.35 + u * 0.05 : fs1 * 1.35 + u * 0.06, y = H * (H > W ? 0.045 : 0.05);
+  const bw = W * ease(p);
+  if (bw < 1) return;
+  g.save(); g.globalAlpha = alpha;
+  g.shadowColor = "rgba(0,0,0,.35)"; g.shadowBlur = u * 0.045; g.shadowOffsetY = u * 0.012;
+  g.fillStyle = k.bg; g.fillRect(0, y, bw, bh);
+  g.shadowColor = "transparent";
+  g.beginPath(); g.rect(0, y, bw, bh); g.clip();
+  g.fillStyle = k.ink; g.textAlign = "center"; g.textBaseline = "middle";
+  const a = headText(line1 || "Your heading"), b = two ? headText(line2) : "";
+  if (two) {
+    fitFont(g, a, 700, fs1, W * 0.88); g.fillText(a, W / 2, y + u * 0.025 + fs1 * 0.68);
+    fitFont(g, b, 400, fs2, W * 0.88); g.fillText(b, W / 2, y + u * 0.025 + fs1 * 1.35 + fs2 * 0.68);
+  } else { fitFont(g, a, 700, fs1, W * 0.88); g.fillText(a, W / 2, y + bh / 2); }
+  g.restore();
+}
+// Simple pictures for chapter cards, drawn in a box of size s centred at (cx, cy).
+function drawIcon(g, name, cx, cy, s, color) {
+  if (!name || name === "none") return;
+  g.save(); g.translate(cx - s / 2, cy - s / 2); g.scale(s / 100, s / 100);
+  g.fillStyle = g.strokeStyle = color; g.lineCap = g.lineJoin = "round";
+  if (name === "chart") {
+    [[4, 82, 8], [16, 72, 18], [30, 62, 28], [44, 50, 40], [58, 38, 52], [72, 26, 64]].forEach(([x, y]) => g.fillRect(x, y, 10, 92 - y));
+    g.fillRect(0, 90, 86, 4);
+    g.lineWidth = 5; g.beginPath(); g.moveTo(6, 84); g.quadraticCurveTo(58, 80, 84, 16); g.stroke();
+    g.beginPath(); g.moveTo(90, 4); g.lineTo(94, 26); g.lineTo(74, 18); g.closePath(); g.fill();
+  } else if (name === "bulb") {
+    g.lineWidth = 6;
+    g.beginPath(); g.arc(50, 40, 26, Math.PI * 0.8, Math.PI * 2.2); g.lineTo(62, 72); g.lineTo(38, 72); g.closePath(); g.stroke();
+    g.fillRect(38, 78, 24, 6); g.fillRect(41, 88, 18, 6);
+    [[50, 2, 50, 8], [14, 16, 19, 21], [86, 16, 81, 21], [4, 42, 10, 42], [96, 42, 90, 42]].forEach(([a, b, c, d]) => { g.beginPath(); g.moveTo(a, b); g.lineTo(c, d); g.stroke(); });
+  } else if (name === "list") {
+    g.lineWidth = 6;
+    [18, 48, 78].forEach(y => {
+      g.beginPath(); g.moveTo(6, y); g.lineTo(13, y + 7); g.lineTo(26, y - 8); g.stroke();
+      g.fillRect(38, y - 3, 56, 7);
+    });
+  } else if (name === "target") {
+    g.lineWidth = 7;
+    [44, 30, 16].forEach(r => { g.beginPath(); g.arc(50, 50, r, 0, Math.PI * 2); g.stroke(); });
+    g.beginPath(); g.arc(50, 50, 6, 0, Math.PI * 2); g.fill();
+  } else if (name === "star") {
+    g.beginPath();
+    for (let i = 0; i < 10; i++) { const r = i % 2 ? 20 : 46, a = -Math.PI / 2 + i * Math.PI / 5; g.lineTo(50 + r * Math.cos(a), 52 + r * Math.sin(a)); }
+    g.closePath(); g.fill();
+  } else if (name === "chat") {
+    g.beginPath(); g.roundRect(4, 10, 92, 60, 14); g.fill();
+    g.beginPath(); g.moveTo(24, 66); g.lineTo(18, 92); g.lineTo(46, 68); g.closePath(); g.fill();
+  }
+  g.restore();
+}
+// A chapter at local time a (seconds since it started): the full card, then the pinned heading.
+function drawChapter(g, W, H, x, a) {
+  const ch = x.ch, len = x.t1 - x.t0, out = clamp((len - a) / 0.3, 0, 1);
+  if (a < ch.card) {
+    const u = Math.min(W, H), k = V.look, fadeIn = clamp(a / 0.2, 0, 1);
+    g.save(); g.globalAlpha = fadeIn * (ch.card - a < 0.15 ? (ch.card - a) / 0.15 : 1);
+    g.fillStyle = k.bg; g.fillRect(0, 0, W, H);
+    const s = u * (H > W ? 0.5 : 0.36) * (0.85 + 0.15 * ease(a / 0.5));
+    drawIcon(g, ch.icon, W / 2, H * (H > W ? 0.56 : 0.6), s, k.accent);
+    g.restore();
+  }
+  drawTopBar(g, W, H, ch.text.trim(), ch.sub.trim(), a / 0.5, out);
+}
+// The cover title: a poster over the opening seconds, with the video playing in a frame.
+// It starts full-screen, shrinks into its frame, and grows back out at the end.
+function coverRects(W, H) {
+  const tall = H > W, img = !!V.cover;
+  if (tall) {
+    const fw = W * 0.86, fh = Math.min(fw * 0.82, H * 0.38), fy = img ? H * 0.3 : H * 0.17;
+    return { img: img && { x: 0, y: 0, w: W, h: H * 0.27 }, frame: { x: (W - fw) / 2, y: fy, w: fw, h: fh }, text: { x: W * 0.12, y: fy + fh + H * 0.05, w: W * 0.76 } };
+  }
+  const fw = W * 0.5, fh = fw * 9 / 16;
+  return { img: img && { x: W * 0.6, y: 0, w: W * 0.4, h: H * 0.42 }, frame: { x: W * 0.05, y: (H - fh) / 2, w: fw, h: fh }, text: { x: W * 0.6, y: img ? H * 0.5 : H * 0.3, w: W * 0.35 } };
+}
+function drawCover(g, W, H, a, dur, L, m) {
+  const k = V.look, u = Math.min(W, H), R = coverRects(W, H);
+  const p = Math.min(ease(a / 0.8), dur > 2 ? ease((dur - a) / 0.6) : 1);   // 0 = full screen, 1 = in its frame
+  g.save();
+  g.globalAlpha = p; g.fillStyle = k.bg; g.fillRect(0, 0, W, H);
+  // a soft circle in the accent colour, like printed stationery
+  g.globalAlpha = p * 0.16; g.fillStyle = k.accent;
+  g.beginPath(); g.arc(W * 0.95, H * (H > W ? 0.8 : 0.85), u * 0.32, 0, Math.PI * 2); g.fill();
+  g.globalAlpha = p;
+  if (R.img) {
+    const b = V.cover.bmp, r = R.img, sc = Math.max(r.w / b.width, r.h / b.height);
+    g.save(); g.beginPath(); g.rect(r.x, r.y, r.w, r.h); g.clip();
+    g.drawImage(b, r.x + (r.w - b.width * sc) / 2, r.y + (r.h - b.height * sc) / 2, b.width * sc, b.height * sc);
+    g.restore();
+  }
+  // title box with an outline, and the second line under the title
+  const T = R.text, title = headText(V.title.text.trim() || "Your title here"), sub = V.title.sub.trim();
+  const fs =Math.round(u * (H > W ? 0.07 : 0.05)), sfs = Math.round(fs * 0.62);
+  g.font = `900 ${fs}px ${fontStack(k.font)}`;
+  const lines = wrapLines(g, title, T.w - fs), lh = fs * 1.2, boxH = lines.length * lh + fs * 0.9 + (sub ? sfs * 1.6 : 0);
+  g.lineWidth = Math.max(1.5, u * 0.004); g.strokeStyle = k.ink; g.strokeRect(T.x, T.y, T.w, boxH);
+  g.fillStyle = k.ink; g.textAlign = "center"; g.textBaseline = "middle";
+  lines.forEach((l, i) => g.fillText(l, T.x + T.w / 2, T.y + fs * 0.45 + lh * (i + 0.5)));
+  if (sub) { g.font = `400 ${sfs}px ${fontStack(k.font)}`; g.globalAlpha = p * 0.8; g.fillText(sub, T.x + T.w / 2, T.y + fs * 0.45 + lh * lines.length + sfs * 0.8); }
+  g.restore();
+  // the video, moving between full screen and its frame
+  const F = R.frame, x = F.x * p, y = F.y * p, w = W + (F.w - W) * p, h = H + (F.h - H) * p;
+  if (m) {
+    g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip(); g.translate(x, y);
+    drawMedia(g, w, h, m, L.scale, 1, p > 0.01 || V.fit === "fill");
+    g.restore();
+  }
+  if (p > 0.01) { g.save(); g.globalAlpha = p; g.lineWidth = Math.max(2, u * 0.007); g.strokeStyle = "#FFFFFF"; g.strokeRect(x, y, w, h); g.restore(); }
+}
+// The next clip arrives in three bands that slide in from alternate sides.
+function drawPanels(g, W, H, m, L) {
+  for (let i = 0; i < 3; i++) {
+    const q = ease((L.panels - i * 0.15) / 0.7), dx = (1 - q) * W * (i % 2 ? -1 : 1);
+    if (q <= 0) continue;
+    g.save(); g.beginPath(); g.rect(0, H * i / 3, W, H / 3 + 1); g.clip(); g.translate(dx, 0);
+    drawMedia(g, W, H, m, L.scale, 1);
+    g.restore();
+  }
 }
 // One output picture. getImg(layer) gives the picture for a clip layer, or null.
 function compose(g, W, H, st, getImg) {
   g.globalAlpha = 1; g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
+  const cover = V.title.on && V.title.style === "cover" && st.t < V.title.dur;
+  const top = st.layers.filter(L => L.it.kind === "clip").at(-1);
   for (const L of st.layers) {
-    if (L.it.kind === "title") drawTitle(g, W, H, L.alpha);
-    else { const m = getImg(L); if (m) drawMedia(g, W, H, m, L.scale, L.alpha); }
+    if (L.it.kind === "title") { drawTitle(g, W, H, L.alpha); continue; }
+    const m = getImg(L);
+    if (cover) { if (L === top) drawCover(g, W, H, st.t, V.title.dur, L, m); }
+    else if (!m) continue;
+    else if (L.panels != null) drawPanels(g, W, H, m, L);
+    else drawMedia(g, W, H, m, L.scale, L.alpha);
   }
-  if (st.cap) drawCaption(g, W, H, st.cap, st.t);
+  const P = st.P, ch = P && !cover ? chapterAt(P, st.t) : null, bn = P && !cover && !ch ? bannerSpan(P) : null;
+  if (ch) drawChapter(g, W, H, ch, st.t - ch.t0);
+  else if (bn && st.t >= bn.t0 && st.t < bn.t1) drawTopBar(g, W, H, V.banner.text.trim(), "", (st.t - bn.t0) / 0.5, clamp((bn.t1 - st.t) / 0.3, 0, 1));
+  // no captions over a full-screen card
+  if (st.cap && !cover && !(ch && st.t - ch.t0 < ch.ch.card)) drawCaption(g, W, H, st.cap, st.t);
   if (st.black > 0) { g.globalAlpha = Math.min(1, st.black); g.fillStyle = "#000"; g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
 }
 
@@ -793,10 +1019,10 @@ function changed() {
   V.T = clamp(V.T, 0, vtotal());
   V.sel = V.clips.length ? Math.min(V.sel, V.clips.length - 1) : -1;
   if (V.selJoin < 1 || V.selJoin >= V.clips.length) V.selJoin = -1;
-  sizeTimeline(); sizePreview(); renderCapList(); vtick(); updateUi(); vSave();
+  sizeTimeline(); sizePreview(); renderCapList(); renderChapList(); vtick(); updateUi(); vSave();
 }
 // Settings outside the undo history (music, title, shape) just redraw.
-function settingsChanged() { V.version++; V.T = clamp(V.T, 0, vtotal()); sizeTimeline(); sizePreview(); renderCapList(); vtick(); updateUi(); vSave(); }
+function settingsChanged() { V.version++; V.T = clamp(V.T, 0, vtotal()); sizeTimeline(); sizePreview(); renderCapList(); renderChapList(); vtick(); updateUi(); vSave(); }
 
 /* ---------- Editing ---------- */
 function splitAtPlayhead() {
@@ -960,7 +1186,7 @@ function vtick() {
   syncPlayers(P, V.T);
   // draw only when every picture on screen is ready, so seeking never flashes black
   const st = layersAt(P, V.T), imgs = new Map();
-  st.cap = capAt(P, V.T); st.t = V.T;
+  st.cap = capAt(P, V.T); st.t = V.T; st.P = P;
   markActiveCap(st.cap);
   for (const L of st.layers) {
     if (L.it.kind !== "clip") continue;
@@ -1041,6 +1267,20 @@ function drawTimeline() {
     g.fillStyle = C.accent; g.fillRect(Math.round(at) - 1, tl.clipY - 4, 3, tl.clipH + 8);
     drawClip(g, c, x0, x0 + w, true, 0.75);
   }
+  // chapter flags along the top of the clips
+  if (!(d && d.kind === "move" && d.moved)) {
+    g.font = `600 11px ${C.body || "sans-serif"}`; g.textBaseline = "middle";
+    for (const x of chaptersOnTimeline(P)) {
+      const x0 = xOf(x.t0), x1 = xOf(x.t1);
+      if (x1 < 0 || x0 > W) continue;
+      const y = tl.clipY + 24, label = x.ch.text.trim() || "Chapter", lw = Math.min(g.measureText(label).width + 10, Math.max(30, x1 - x0));
+      g.fillStyle = C.t[3];
+      g.fillRect(x0 - 1, tl.clipY + 2, 2, tl.clipH - 4);
+      roundBox(g, x0, y, lw, 16, C.t[3]);
+      g.save(); g.beginPath(); g.rect(x0, y, lw - 4, 16); g.clip();
+      g.fillStyle = C.surface; g.fillText(label, x0 + 5, y + 8); g.restore();
+    }
+  }
   // captions and music lanes
   drawCapLane(g, P, W);
   if (V.music) drawMusic(g, P, W);
@@ -1057,11 +1297,11 @@ function roundBox(g, l, y, w, h, fill, stroke, lw) {
 function drawTitleBox(g, x0, x1) {
   const C = tl.col, l = x0 + 1, w = Math.max(2, x1 - x0 - 2);
   g.save();
-  roundBox(g, l, tl.clipY, w, tl.clipH, "#16111B", C.accent, 1);
+  roundBox(g, l, tl.clipY, w, tl.clipH, V.look.bg, C.accent, 1);
   g.clip();
-  g.fillStyle = "#F2EAF1"; g.font = `600 12px ${C.body || "sans-serif"}`; g.textBaseline = "middle";
+  g.fillStyle = V.look.ink; g.font = `600 12px ${C.body || "sans-serif"}`; g.textBaseline = "middle";
   g.fillText("Title card", l + 8, tl.clipY + 14, Math.max(0, w - 16));
-  g.fillStyle = "#C9BAC6"; g.font = `12px ${C.body || "sans-serif"}`;
+  g.font = `12px ${C.body || "sans-serif"}`;
   g.fillText(V.title.text.trim() || "Your title here", l + 8, tl.clipY + 44, Math.max(0, w - 16));
   g.restore();
 }
@@ -1415,7 +1655,7 @@ async function vExport() {
     const acfg = { codec: "mp4a.40.2", sampleRate: sr, numberOfChannels: 2, bitrate: 192000 };
     if (!(await AudioEncoder.isConfigSupported(acfg).then(r => r.supported, () => false))) throw new Error("this browser can't make AAC sound. Try Chrome or Edge");
     const burn = V.capLook.burn && capsOnTimeline(P).length > 0;
-    if (V.title.on || burn) await Promise.all(["700 40px Figtree", "500 20px Figtree", "600 20px Figtree", "800 40px Figtree"].map(f => document.fonts.load(f).catch(() => {})));
+    await loadFonts();
 
     const target = writable ? new Mp4Muxer.FileSystemWritableFileStreamTarget(writable) : new Mp4Muxer.ArrayBufferTarget();
     const muxer = new Mp4Muxer.Muxer({ target, video: { codec: "avc", width: W, height: H, frameRate: fps }, audio: { codec: "aac", numberOfChannels: 2, sampleRate: sr },
@@ -1439,7 +1679,8 @@ async function vExport() {
     for (let k = 0; k < frames; k++) {
       if (V.cancel) throw new Error("cancelled");
       const t = k / fps + 0.0005, st = layersAt(P, t), imgs = new Map();
-      if (burn) { st.cap = capAt(P, t); st.t = t; }
+      st.t = t; st.P = P;
+      if (burn) st.cap = capAt(P, t);
       for (const [it, r] of readers) if (it.end <= t) { r.close(); readers.delete(it); }
       for (const L of st.layers) {
         if (L.it.kind !== "clip") continue;
@@ -1580,8 +1821,10 @@ function projectData() {
     sources: V.sources.map(s => ({ id: s.id, name: s.name, color: s.color })),
     clips: V.clips.map(c => ({ id: c.id, src: c.src.id, in: c.in, out: c.out, trans: c.trans || null })),
     caps: V.caps.map(k => ({ id: k.id, src: k.src.id, s: k.s, e: k.e, text: k.text })),
-    title: V.title, shape: V.shape, fit: V.fit, capLook: V.capLook, enh: V.enh,
+    chapters: V.chapters.map(c => ({ ...c, src: c.src.id })),
+    title: V.title, banner: V.banner, look: V.look, shape: V.shape, fit: V.fit, capLook: V.capLook, enh: V.enh,
     music: V.music ? { name: V.music.name, vol: V.music.vol, duck: V.music.duck } : null,
+    cover: V.cover ? { name: V.cover.name } : null,
   };
 }
 function vSave() {
@@ -1610,9 +1853,14 @@ async function vRestore() {
   }
   V.clips = p.clips.filter(c => byId.has(c.src)).map(c => ({ ...c, src: byId.get(c.src) }));
   V.caps = (p.caps || []).filter(k => byId.has(k.src)).map(k => ({ ...k, src: byId.get(k.src) }));
+  V.chapters = (p.chapters || []).filter(c => byId.has(c.src)).map(c => ({ ...c, src: byId.get(c.src) }));
   Object.assign(V.title, p.title || {}); Object.assign(V.capLook, p.capLook || {}); Object.assign(V.enh, p.enh || {});
+  Object.assign(V.banner, p.banner || {}); if (p.look) V.look = { ...V.look, ...p.look };
+  if (p.cover) {
+    try { const f = await vstore.getFile("cover"); V.cover = { name: p.cover.name, bmp: await createImageBitmap(f) }; } catch (e) { failed++; }
+  }
   V.shape = p.shape || V.shape; V.fit = p.fit || V.fit;
-  V.nextId = Math.max(p.nextId || 1, ...V.sources.map(s => s.id + 1), ...V.clips.map(c => c.id + 1), ...V.caps.map(k => k.id + 1));
+  V.nextId = Math.max(p.nextId || 1, ...V.sources.map(s => s.id + 1), ...V.clips.map(c => c.id + 1), ...V.caps.map(k => k.id + 1), ...V.chapters.map(c => c.id + 1));
   if (p.name) $("#vName").value = p.name;
   if (p.music) {
     try {
@@ -1620,10 +1868,7 @@ async function vRestore() {
       V.music = { name: p.music.name, buffer: await decodeFile(audio(), f), vol: p.music.vol, duck: p.music.duck };
     } catch (e) { failed++; }
   }
-  // put the forms back as they were
-  $("#vTitleOn").checked = V.title.on; $("#vTitleText").value = V.title.text; $("#vTitleSub").value = V.title.sub; $("#vTitleDur").value = String(V.title.dur);
-  if (V.music) { $("#vMusicVol").value = Math.round(V.music.vol * 100); $("#vDuck").checked = V.music.duck; }
-  showEnh();
+  syncForms();
   V.sel = V.clips.length ? 0 : -1;
   vStatus(failed ? `Opened your last project, but ${failed} file${failed > 1 ? "s" : ""} couldn't be read back. Add ${failed > 1 ? "them" : "it"} again.` : "Picked up where you left off.", failed > 0);
   if (!failed) setTimeout(() => { if ($("#vStatus").textContent === "Picked up where you left off.") vStatus(""); }, 4000);
@@ -1635,7 +1880,7 @@ async function vRestoreAll() {
   if (enhKey() !== "0:0") processVoices();
   // tidy away stored videos the project no longer uses
   try {
-    const keep = new Set(V.sources.map(s => "src-" + s.id).concat(V.music ? ["music"] : []));
+    const keep = new Set(V.sources.map(s => "src-" + s.id).concat(V.music ? ["music"] : [], V.cover ? ["cover"] : []));
     for (const k of await vstore.fileKeys()) if (!keep.has(k)) await vstore.delFile(k);
   } catch (e) {}
 }
@@ -1651,10 +1896,12 @@ async function startOver() {
   if (capJob) cancelAutoCaptions();
   vPause();
   V.sources.forEach(s => URL.revokeObjectURL(s.url));
-  Object.assign(V, { sources: [], clips: [], caps: [], undo: [], redo: [], sel: -1, selJoin: -1, selCap: null, T: 0, music: null });
-  Object.assign(V.title, { on: false, text: "", sub: "", dur: 3 });
-  Object.assign(V.enh, { noise: 0, level: false, bright: 0, contrast: 0, sat: 0, warm: 0 }); showEnh();
-  $("#vTitleOn").checked = false; $("#vTitleText").value = ""; $("#vTitleSub").value = ""; $("#vName").value = "";
+  // the style (colours, font, caption look, banner name) stays for the next video in the series
+  Object.assign(V, { sources: [], clips: [], caps: [], chapters: [], undo: [], redo: [], sel: -1, selJoin: -1, selCap: null, T: 0, music: null, cover: null });
+  Object.assign(V.title, { on: false, text: "", dur: 3 });
+  Object.assign(V.enh, { noise: 0, level: false, bright: 0, contrast: 0, sat: 0, warm: 0 });
+  $("#vName").value = "";
+  syncForms();
   els.forEach(e => { e.removeAttribute("src"); e.dataset.src = ""; e.itemId = null; e.load(); });
   try { await vstore.clear(); } catch (e) {}
   changed();
@@ -1871,6 +2118,150 @@ function cancelAutoCaptions() {
   updateUi();
 }
 
+/* ---------- Chapters panel ---------- */
+function chaptersChanged() { V.version++; renderChapList(); vtick(); updateUi(); vSave(); }
+const option = (value, label, sel) => { const o = document.createElement("option"); o.value = value; o.textContent = label; o.selected = sel; return o; };
+function renderChapList() {
+  const box = $("#vChapList"), rows = chaptersOnTimeline(vplan());
+  const focused = document.activeElement && document.activeElement.closest(".vchap");
+  const fid = focused && focused.dataset.id, fk = fid && document.activeElement.dataset.k;
+  box.replaceChildren(...rows.map((x, n) => {
+    const ch = x.ch, row = document.createElement("li");
+    row.className = "vchap"; row.dataset.id = ch.id;
+    const time = document.createElement("button");
+    time.type = "button"; time.className = "vcap-time mono"; time.textContent = fmt(x.t0, 1);
+    time.title = "Jump here"; time.setAttribute("aria-label", `Jump to chapter ${n + 1} at ${fmt(x.t0, 1)}`);
+    time.addEventListener("click", () => vSeek(x.t0 + 0.01));
+    const field = (k, label, ph) => {
+      const i = document.createElement("input");
+      i.className = "vname"; i.value = ch[k]; i.placeholder = ph; i.maxLength = 60; i.dataset.k = k; i.autocomplete = "off";
+      i.setAttribute("aria-label", `Chapter ${n + 1} ${label}`);
+      i.addEventListener("focus", () => { if (!V.playing) vSeek(x.t0 + Math.min(ch.card + 0.5, x.t1 - x.t0 - 0.01)); });
+      i.addEventListener("input", () => { ch[k] = i.value; vtick(); vSave(); });
+      return i;
+    };
+    const del = document.createElement("button");
+    del.type = "button"; del.className = "icon-btn"; del.setAttribute("aria-label", `Delete chapter ${n + 1}`);
+    del.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    del.addEventListener("click", () => deleteChapter(ch.id));
+    const pick = (k, label, opts) => {
+      const s = document.createElement("select");
+      s.dataset.k = k; s.setAttribute("aria-label", `Chapter ${n + 1} ${label}`); s.title = label;
+      s.append(...opts.map(([v, l]) => option(v, l, String(ch[k]) === String(v))));
+      s.addEventListener("change", () => { ch[k] = k === "icon" ? s.value : +s.value; chaptersChanged(); vSeek(x.t0 + 0.01); });
+      return s;
+    };
+    const opts = document.createElement("div");
+    opts.className = "vchap-opts";
+    opts.append(
+      pick("icon", "picture", Object.entries(ICONS)),
+      pick("card", "full-screen card", [[0, "No card"], [1, "Card 1 s"], [1.5, "Card 1.5 s"], [2, "Card 2 s"], [3, "Card 3 s"]]),
+      pick("hold", "heading stays", [[2, "Then 2 s"], [4, "Then 4 s"], [6, "Then 6 s"], [10, "Then 10 s"]]));
+    row.append(time, field("text", "heading", "Heading, like What to target"), del, field("sub", "second line", "Second line (optional)"), opts);
+    return row;
+  }));
+  $("#vChapEmpty").hidden = rows.length > 0;
+  if (fid) { const el = box.querySelector(`.vchap[data-id="${fid}"] [data-k="${fk}"]`); if (el) el.focus({ preventScroll: true }); }
+}
+function addChapterAtPlayhead(fields = {}) {
+  if (!V.clips.length || V.exporting) return null;
+  const L = locate(V.T), c = V.clips[L.i];
+  if (!c) { vStatus("Move the playhead onto a clip to start a chapter there."); return null; }
+  // new chapters copy the last one's picture and timings, so a series stays consistent
+  const last = V.chapters.at(-1) || { icon: "chart", card: 1.5, hold: 4 };
+  const ch = { id: V.nextId++, src: c.src, s: L.s, text: "", sub: "", icon: last.icon, card: last.card, hold: last.hold, ...fields };
+  V.chapters.push(ch);
+  showTab("chap"); chaptersChanged();
+  const inp = $(`#vChapList .vchap[data-id="${ch.id}"] [data-k="text"]`);
+  if (inp && !fields.text) { showRow(inp.closest(".vchap")); inp.focus({ preventScroll: true }); }
+  vStatus("Chapter added. Type its heading; it shows as a full card, then stays at the top.");
+  return ch;
+}
+function deleteChapter(id) {
+  const i = V.chapters.findIndex(c => c.id === id);
+  if (i < 0) return;
+  const [ch] = V.chapters.splice(i, 1);
+  chaptersChanged();
+  toast("Chapter deleted.", () => { V.chapters.splice(Math.min(i, V.chapters.length), 0, ch); chaptersChanged(); });
+}
+
+/* ---------- Style panel ---------- */
+// Saved styles live in this browser, so every video in a series can share one look.
+const STYLE_KEY = "hookd-styles";
+function savedStyles() { try { return JSON.parse(localStorage.getItem(STYLE_KEY)) || []; } catch (e) { return []; } }
+function storeStyles(list) { try { localStorage.setItem(STYLE_KEY, JSON.stringify(list)); return true; } catch (e) { return false; } }
+function currentStyle(name) {
+  return { name, look: { ...V.look }, capLook: { style: V.capLook.style, size: V.capLook.size, pos: V.capLook.pos },
+    banner: { ...V.banner }, title: { style: V.title.style, sub: V.title.sub } };
+}
+function applyStyle(s) {
+  V.look = { ...V.look, ...s.look };
+  if (s.capLook) Object.assign(V.capLook, s.capLook);
+  if (s.banner) Object.assign(V.banner, s.banner);
+  if (s.title) Object.assign(V.title, s.title);
+  syncForms(); lookChanged();
+}
+function lookChanged() { settingsChanged(); loadFonts().then(() => vtick()); }
+function renderStyles() {
+  const box = $("#vThemes"), saved = savedStyles(), swatch = l => {
+    const i = document.createElement("i");
+    i.setAttribute("aria-hidden", "true");
+    i.style.background = l.bg; i.style.color = l.ink; i.style.borderColor = l.accent;
+    const b = document.createElement("b"); b.style.background = l.hiBox; i.append("Aa", b);
+    return i;
+  };
+  const btns = Object.entries(THEMES).map(([id, t]) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.theme = id; b.append(swatch(t), t.name);
+    b.setAttribute("aria-pressed", V.look.theme === id);
+    return b;
+  });
+  saved.forEach((s, n) => {
+    const wrap = document.createElement("span"), b = document.createElement("button"), x = document.createElement("button");
+    wrap.className = "vsaved";
+    b.type = "button"; b.dataset.saved = n; b.append(swatch(s.look), s.name);
+    b.setAttribute("aria-pressed", V.look.theme === "saved:" + s.name);
+    x.type = "button"; x.className = "icon-btn"; x.dataset.unsave = n; x.setAttribute("aria-label", `Remove the style ${s.name}`);
+    x.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    wrap.append(b, x); btns.push(wrap);
+  });
+  box.replaceChildren(...btns);
+}
+function saveStyle() {
+  const name = $("#vStyleName").value.trim().slice(0, 30);
+  if (!name) { $("#vStyleName").focus(); vStatus("Give your style a name first, like the name of your series."); return; }
+  V.look.theme = "saved:" + name;
+  const list = savedStyles().filter(s => s.name !== name);
+  list.push(currentStyle(name));
+  if (!storeStyles(list.slice(-12))) { vStatus("This browser isn't letting the page save styles.", true); return; }
+  $("#vStyleName").value = "";
+  renderStyles(); vSave();
+  vStatus(`Saved the style "${name}". Pick it on your next video to make it match.`);
+}
+
+/* ---------- Title, banner and cover ---------- */
+async function addCover(file) {
+  if (!file) return;
+  try {
+    V.cover = { name: cleanName(file.name), bmp: await createImageBitmap(file) };
+    storeFile("cover", file);
+    vStatus(`Added ${V.cover.name} to the cover.`);
+  } catch (e) { vStatus(`Couldn't read ${file.name}. Use a JPG, PNG or WebP picture.`, true); }
+  settingsChanged(); vSeek(1);
+}
+
+/* ---------- Forms ---------- */
+// Put every control back in step with the project (after a restore, a style or the API).
+function syncForms() {
+  $("#vTitleOn").checked = V.title.on; $("#vTitleText").value = V.title.text; $("#vTitleSub").value = V.title.sub; $("#vTitleDur").value = String(V.title.dur);
+  $("#vBannerOn").checked = V.banner.on; $("#vBannerText").value = V.banner.text; $("#vBannerDur").value = String(V.banner.dur);
+  if (V.music) { $("#vMusicVol").value = Math.round(V.music.vol * 100); $("#vDuck").checked = V.music.duck; }
+  const k = V.look;
+  $("#vColBg").value = k.bg; $("#vColInk").value = k.ink; $("#vColAccent").value = k.accent; $("#vColHiBox").value = k.hiBox; $("#vColHiInk").value = k.hiInk;
+  $("#vFont").value = k.font; $("#vCaps").checked = k.caps;
+  showEnh(); renderStyles(); renderChapList();
+}
+
 /* ---------- UI ---------- */
 function vStatus(msg, err) { const s = $("#vStatus"); s.textContent = msg; s.classList.toggle("err", !!err); }
 function showTab(name) {
@@ -1914,6 +2305,22 @@ function updateUi() {
   $("#vShapeOut").textContent = has ? `Exports at ${W}×${H}.` : "";
   if (!busy) $("#vNote").textContent = has ? `Exports an MP4 at ${W}×${H}.` : "Exports at your video's own size, up to 1080p.";
   ["#vTitleText", "#vTitleSub", "#vTitleDur"].forEach(s => ($(s).disabled = !V.title.on));
+  document.querySelectorAll("#vTitleStyle [data-tstyle]").forEach(b => { b.setAttribute("aria-pressed", b.dataset.tstyle === V.title.style); b.disabled = !V.title.on; });
+  const isCover = V.title.style === "cover";
+  $("#vCoverSet").hidden = !isCover;
+  $("#vCoverAdd").disabled = !V.title.on;
+  $("#vCoverAdd").textContent = V.cover ? "Change picture" : "Add a picture";
+  $("#vCoverName").textContent = V.cover ? V.cover.name : "";
+  $("#vCoverDel").hidden = !V.cover;
+  $("#vTitleHelp").textContent = isCover ? "Covers the first seconds of your video: it shrinks into a frame under your title, then grows back out. Nothing is added to the length."
+    : "A plain card that plays before your video, in your style's colours.";
+  ["#vBannerText", "#vBannerDur"].forEach(s => ($(s).disabled = !V.banner.on));
+  // chapters and style
+  $("#vChapAdd").disabled = !has || busy;
+  document.querySelectorAll("#vThemes [data-theme], #vThemes [data-saved]").forEach(b => {
+    const s = b.dataset.saved != null && savedStyles()[b.dataset.saved];
+    b.setAttribute("aria-pressed", V.look.theme === (s ? "saved:" + s.name : b.dataset.theme));
+  });
   // captions
   const hasCaps = capsOnTimeline(vplan()).length > 0;
   $("#vCapAuto").disabled = (!has || busy) && !capJob;
@@ -1924,6 +2331,7 @@ function updateUi() {
   $("#vCapSrt").disabled = !hasCaps;
   ["#vCapLang", "#vCapModel"].forEach(s => ($(s).disabled = !!capJob));
   document.querySelectorAll("#vCapStyle [data-style]").forEach(b => b.setAttribute("aria-pressed", b.dataset.style === V.capLook.style));
+  $("#vCapBoxHelp").hidden = V.capLook.style !== "box";
   document.querySelectorAll("#vCapSize [data-size]").forEach(b => b.setAttribute("aria-pressed", b.dataset.size === V.capLook.size));
   document.querySelectorAll("#vCapPos [data-pos]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pos === V.capLook.pos));
   $("#vCapBurn").checked = V.capLook.burn;
@@ -1980,6 +2388,39 @@ $("#vTitleOn").addEventListener("change", e => { V.title.on = e.target.checked; 
 $("#vTitleText").addEventListener("input", e => { V.title.text = e.target.value; vtick(); vSave(); });
 $("#vTitleSub").addEventListener("input", e => { V.title.sub = e.target.value; vtick(); vSave(); });
 $("#vTitleDur").addEventListener("change", e => { V.title.dur = +e.target.value; settingsChanged(); });
+$("#vTitleStyle").addEventListener("click", e => {
+  const b = e.target.closest("[data-tstyle]"); if (!b) return;
+  V.title.style = b.dataset.tstyle; settingsChanged(); vSeek(V.title.style === "cover" ? 1 : 0.5);
+});
+$("#vCoverAdd").addEventListener("click", () => $("#vCoverIn").click());
+$("#vCoverIn").addEventListener("change", e => { addCover(e.target.files[0]); e.target.value = ""; });
+$("#vCoverDel").addEventListener("click", () => { V.cover = null; vstore.delFile("cover").catch(() => {}); settingsChanged(); });
+// series banner
+$("#vBannerOn").addEventListener("change", e => {
+  V.banner.on = e.target.checked; settingsChanged();
+  if (V.banner.on) { const b = bannerSpan(vplan()); vSeek(b ? b.t0 + 1 : 0); if (!V.banner.text) $("#vBannerText").focus(); }
+});
+$("#vBannerText").addEventListener("input", e => { V.banner.text = e.target.value; vtick(); vSave(); });
+$("#vBannerDur").addEventListener("change", e => { V.banner.dur = +e.target.value; settingsChanged(); });
+// chapters
+$("#vChapAdd").addEventListener("click", () => addChapterAtPlayhead());
+// style
+$("#vThemes").addEventListener("click", e => {
+  const un = e.target.closest("[data-unsave]");
+  if (un) { const list = savedStyles(); const [s] = list.splice(+un.dataset.unsave, 1); storeStyles(list); renderStyles(); updateUi(); if (s) vStatus(`Removed the style "${s.name}".`); return; }
+  const sv = e.target.closest("[data-saved]");
+  if (sv) { const s = savedStyles()[+sv.dataset.saved]; if (s) { applyStyle({ ...s, look: { ...s.look, theme: "saved:" + s.name } }); vStatus(`Using your style "${s.name}".`); } return; }
+  const b = e.target.closest("[data-theme]");
+  if (!b) return;
+  V.look = lookOf(b.dataset.theme); syncForms(); lookChanged();
+  vStatus(`${THEMES[b.dataset.theme].name} colours on your title, banner, chapters and Highlight captions.`);
+});
+[["#vColBg", "bg"], ["#vColInk", "ink"], ["#vColAccent", "accent"], ["#vColHiBox", "hiBox"], ["#vColHiInk", "hiInk"]].forEach(([sel, k]) =>
+  $(sel).addEventListener("input", e => { V.look[k] = e.target.value; V.look.theme = "custom"; updateUi(); vtick(); vSave(); }));
+$("#vFont").addEventListener("change", e => { V.look.font = e.target.value; V.look.theme = "custom"; updateUi(); lookChanged(); });
+$("#vCaps").addEventListener("change", e => { V.look.caps = e.target.checked; vtick(); vSave(); });
+$("#vStyleSave").addEventListener("click", saveStyle);
+$("#vStyleName").addEventListener("keydown", e => { if (e.key === "Enter") saveStyle(); });
 // shape
 $("#vShapes").addEventListener("click", e => { const b = e.target.closest("[data-shape]"); if (b) { V.shape = b.dataset.shape; settingsChanged(); } });
 $("#vFitSeg").addEventListener("click", e => { const b = e.target.closest("[data-fit]"); if (b) { V.fit = b.dataset.fit; settingsChanged(); } });
@@ -2035,7 +2476,126 @@ document.addEventListener("keydown", e => {
 window.addEventListener("beforeunload", e => { if (V.exporting || vStoring) { e.preventDefault(); e.returnValue = ""; } });
 $("#vName").addEventListener("input", vSave);
 $("#vNew").addEventListener("click", startOver);
+/* ---------- For AI assistants ----------
+   window.hookd lets an assistant that drives the browser for someone (like Claude in
+   Chrome) read and change the edit exactly, instead of guessing at clicks. The guide
+   at /llms.txt explains it. Adding files and exporting stay with the person: the
+   browser only lets them pick files and choose where to save. Times are seconds on
+   the edited video's timeline, the same as the time under the preview. */
+const oneOf = (v, list, what) => { if (!list.map(String).includes(String(v))) throw new Error(`${what} must be one of: ${list.join(", ")}`); return v; };
+const timeArg = (t, what = "time") => { if (typeof t !== "number" || !isFinite(t)) throw new Error(`${what} must be a number of seconds`); return clamp(t, 0, vtotal()); };
+const capById = id => { const k = V.caps.find(c => c.id === id); if (!k) throw new Error(`no caption with id ${id}; call hookd.video.state() for the ids`); return k; };
+const chapById = id => { const c = V.chapters.find(c => c.id === id); if (!c) throw new Error(`no chapter with id ${id}; call hookd.video.state() for the ids`); return c; };
+const chapFields = f => {
+  const out = {};
+  if (f.text != null) out.text = String(f.text).slice(0, 60);
+  if (f.sub != null) out.sub = String(f.sub).slice(0, 60);
+  if (f.icon != null) out.icon = oneOf(f.icon, Object.keys(ICONS), "icon");
+  if (f.card != null) out.card = +oneOf(f.card, [0, 1, 1.5, 2, 3], "card");
+  if (f.hold != null) out.hold = +oneOf(f.hold, [2, 4, 6, 10], "hold");
+  return out;
+};
+window.hookd = {
+  guide: location.origin + "/llms.txt",
+  mode(m) { setMode(oneOf(m, ["build", "live", "video"], "mode")); return m; },
+  video: {
+    state() {
+      const P = vplan();
+      return {
+        mode: state.mode, duration: +P.total.toFixed(3), playhead: +V.T.toFixed(3), playing: V.playing, exporting: V.exporting, fileName: $("#vName").value,
+        output: (([w, h]) => ({ width: w, height: h }))(outSize()),
+        clips: P.items.filter(it => it.kind === "clip").map(it => ({ index: it.ci, video: it.c.src.name, start: +it.start.toFixed(3), end: +it.end.toFixed(3),
+          sourceIn: +it.c.in.toFixed(3), sourceOut: +it.c.out.toFixed(3), transitionIn: it.ci > 0 ? (it.c.trans || { type: "cut" }) : null })),
+        captions: capsOnTimeline(P).map(x => ({ id: x.cap.id, start: +x.t0.toFixed(3), end: +x.t1.toFixed(3), text: x.cap.text })),
+        chapters: chaptersOnTimeline(P).map(x => ({ id: x.ch.id, at: +x.t0.toFixed(3), until: +x.t1.toFixed(3), text: x.ch.text, sub: x.ch.sub, icon: x.ch.icon, card: x.ch.card, hold: x.ch.hold })),
+        title: { ...V.title, coverPicture: V.cover ? V.cover.name : null }, banner: { ...V.banner }, look: { ...V.look }, captionStyle: { ...V.capLook },
+        shape: V.shape, fit: V.fit, music: V.music ? { name: V.music.name, volume: V.music.vol, duck: V.music.duck } : null, enhance: { ...V.enh },
+        themes: Object.keys(THEMES), savedStyles: savedStyles().map(s => s.name), icons: Object.keys(ICONS),
+      };
+    },
+    seek(t) { vSeek(timeArg(t)); return V.T; },
+    play() { vPlay(); }, pause() { vPause(); },
+    // Change settings. Any of: title, banner, look, captionStyle, shape, fit, enhance, music, transition.
+    set(p) {
+      if (!p || typeof p !== "object") throw new Error("pass an object, like { banner: { on: true, text: 'Finance Playbook' } }");
+      if (p.title) {
+        const t = p.title;
+        if (t.style != null) V.title.style = oneOf(t.style, ["card", "cover"], "title.style");
+        if (t.dur != null) V.title.dur = +oneOf(t.dur, [2, 3, 4, 5], "title.dur");
+        if (t.on != null) V.title.on = !!t.on;
+        if (t.text != null) V.title.text = String(t.text).slice(0, 80);
+        if (t.sub != null) V.title.sub = String(t.sub).slice(0, 80);
+      }
+      if (p.banner) {
+        const b = p.banner;
+        if (b.on != null) V.banner.on = !!b.on;
+        if (b.text != null) V.banner.text = String(b.text).slice(0, 60);
+        if (b.dur != null) V.banner.dur = +oneOf(b.dur, [0, 3, 5, 8], "banner.dur (0 = whole video)");
+      }
+      if (p.look) {
+        const l = p.look;
+        if (l.savedStyle != null) {
+          const s = savedStyles().find(x => x.name === l.savedStyle);
+          if (!s) throw new Error(`no saved style called ${l.savedStyle}; saved: ${savedStyles().map(x => x.name).join(", ") || "none"}`);
+          applyStyle({ ...s, look: { ...s.look, theme: "saved:" + s.name } });
+        }
+        if (l.theme != null) V.look = lookOf(oneOf(l.theme, Object.keys(THEMES), "look.theme"));
+        for (const k of ["bg", "ink", "accent", "hiBox", "hiInk"]) if (l[k] != null) {
+          if (!/^#[0-9a-f]{6}$/i.test(l[k])) throw new Error(`look.${k} must be a colour like #1F1F1F`);
+          V.look[k] = l[k].toUpperCase(); V.look.theme = "custom";
+        }
+        if (l.font != null) { V.look.font = oneOf(l.font, Object.keys(FONTS), "look.font"); V.look.theme = "custom"; }
+        if (l.caps != null) V.look.caps = !!l.caps;
+      }
+      if (p.captionStyle) {
+        const c = p.captionStyle;
+        if (c.style != null) V.capLook.style = oneOf(c.style, ["bar", "bold", "box"], "captionStyle.style");
+        if (c.size != null) V.capLook.size = oneOf(c.size, ["s", "m", "l"], "captionStyle.size");
+        if (c.pos != null) V.capLook.pos = oneOf(c.pos, ["bottom", "middle"], "captionStyle.pos");
+        if (c.burn != null) V.capLook.burn = !!c.burn;
+      }
+      if (p.shape != null) V.shape = oneOf(p.shape, Object.keys(SHAPES), "shape");
+      if (p.fit != null) V.fit = oneOf(p.fit, ["fit", "fill"], "fit");
+      if (p.music && V.music) {
+        if (p.music.volume != null) V.music.vol = clamp(+p.music.volume, 0, 1);
+        if (p.music.duck != null) V.music.duck = !!p.music.duck;
+        soundRefresh();
+      }
+      let voice = false;
+      if (p.enhance) {
+        const e = p.enhance;
+        if (e.noise != null) { V.enh.noise = +oneOf(e.noise, [0, 1, 2, 3], "enhance.noise"); voice = true; }
+        if (e.level != null) { V.enh.level = !!e.level; voice = true; }
+        for (const k of ["bright", "contrast", "sat", "warm"]) if (e[k] != null) V.enh[k] = clamp(Math.round(+e[k]), -50, 50);
+      }
+      if (p.transition) {
+        const { into, type, dur = 0.6 } = p.transition;
+        if (!Number.isInteger(into) || into < 1 || into >= V.clips.length) throw new Error("transition.into is the index of the clip it leads into, from 1 to " + (V.clips.length - 1));
+        setTrans(into, { type: oneOf(type, Object.keys(TRANS), "transition.type"), dur: +oneOf(dur, [0.3, 0.6, 1], "transition.dur") });
+      }
+      syncForms(); lookChanged();
+      if (voice) processVoices();
+      return this.state();
+    },
+    addChapter(f = {}) { vSeek(timeArg(f.at, "at")); const ch = addChapterAtPlayhead(chapFields(f)); if (!ch) throw new Error($("#vStatus").textContent); return ch.id; },
+    updateChapter(id, f) { Object.assign(chapById(id), chapFields(f)); chaptersChanged(); },
+    removeChapter(id) { chapById(id); deleteChapter(id); },
+    addCaption({ at, end, text = "" } = {}) {
+      const t0 = timeArg(at, "at"), L = locate(t0 + 0.001), c = V.clips[L.i];
+      if (!c) throw new Error("there's no clip at that time");
+      const e = Math.min(c.out, L.s + Math.max(0.3, timeArg(end, "end") - t0)), cap = { id: V.nextId++, src: c.src, s: L.s, e, text: String(text) };
+      V.caps.push(cap); capsChanged(); return cap.id;
+    },
+    editCaption(id, text) { capById(id).text = String(text); capsChanged(); },
+    removeCaption(id) { capById(id); deleteCaption(id); },
+    split(at) { vSeek(timeArg(at, "at")); const n = V.clips.length; splitAtPlayhead(); if (V.clips.length === n) throw new Error($("#vStatus").textContent); },
+    removeClip(index) { if (!V.clips[index]) throw new Error(`no clip ${index}; there are ${V.clips.length}`); V.sel = index; deleteSelected(); },
+    undo() { undoEdit(); }, redo() { redoEdit(); },
+  },
+};
+
 // reopen in Video mode if that's where the last visit ended
 try { if (localStorage.getItem("hookd-mode") === "video") setMode("video"); } catch (e) {}
+syncForms();
 updateUi();
 vRestoreAll();
