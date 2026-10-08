@@ -31,7 +31,8 @@ const THEMES = {
   clean: { name: "Clean", bg: "#FFFFFF", ink: "#111827", accent: "#2563EB", hiBox: "#FFFFFF", hiInk: "#111827", font: "figtree", caps: false },
 };
 const FONTS = { lato: "Lato", figtree: "Figtree", poppins: "Poppins", serif: "Playfair Display" };
-const lookOf = id => { const { name, ...l } = THEMES[id]; return { theme: id, ...l }; };
+// a theme sets colours and font; the chapter layout is kept
+const lookOf = id => { const { name, ...l } = THEMES[id]; return { theme: id, ...l, chapLayout: (V.look && V.look.chapLayout) || "center" }; };
 V.look = lookOf("midnight");   // matches the title card from before themes existed
 const MIN_CLIP = 0.1;     // shortest piece a split or trim may leave, in seconds
 const PEAKS_PER_SEC = 100;
@@ -926,17 +927,43 @@ function drawIcon(g, name, cx, cy, s, color) {
   g.restore();
 }
 // A chapter at local time a (seconds since it started): the full card, then the pinned heading.
+// "center": the card has a picture above a big centred heading, and the heading moves
+// to the top bar when the card ends. "top": the heading bar is up from the start,
+// with the picture in the middle of the card.
+const chapLayout = () => V.look.chapLayout || "center";
 function drawChapter(g, W, H, x, a) {
-  const ch = x.ch, len = x.t1 - x.t0, out = clamp((len - a) / 0.3, 0, 1);
+  const ch = x.ch, len = x.t1 - x.t0, out = clamp((len - a) / 0.3, 0, 1), centred = chapLayout() === "center";
   if (a < ch.card) {
-    const u = Math.min(W, H), k = V.look, fadeIn = clamp(a / 0.2, 0, 1);
+    const u = Math.min(W, H), k = V.look, tall = H > W, fadeIn = clamp(a / 0.2, 0, 1);
     g.save(); g.globalAlpha = fadeIn * (ch.card - a < 0.15 ? (ch.card - a) / 0.15 : 1);
     g.fillStyle = k.bg; g.fillRect(0, 0, W, H);
-    const s = u * (H > W ? 0.5 : 0.36) * (0.85 + 0.15 * ease(a / 0.5));
-    drawIcon(g, ch.icon, W / 2, H * (H > W ? 0.56 : 0.6), s, k.accent);
+    if (centred) drawCentredCard(g, W, H, ch, a);
+    else drawIcon(g, ch.icon, W / 2, H * (tall ? 0.56 : 0.6), u * (tall ? 0.5 : 0.36) * (0.85 + 0.15 * ease(a / 0.5)), k.accent);
     g.restore();
   }
-  drawTopBar(g, W, H, ch.text.trim(), ch.sub.trim(), a / 0.5, out);
+  if (!centred) drawTopBar(g, W, H, ch.text.trim(), ch.sub.trim(), a / 0.5, out);
+  else if (a >= ch.card) drawTopBar(g, W, H, ch.text.trim(), ch.sub.trim(), (a - ch.card) / 0.5, out);
+}
+function drawCentredCard(g, W, H, ch, a) {
+  const k = V.look, u = Math.min(W, H), tall = H > W, icon = ch.icon && ch.icon !== "none";
+  const head = headText(ch.text.trim() || "Your heading"), sub = ch.sub.trim();
+  const { lines, fs } = fitLines(g, head, 900, Math.round(u * (tall ? 0.095 : 0.075)), W * 0.84);
+  const lh = fs * 1.12, sfs = Math.round(u * (tall ? 0.05 : 0.04)), is = u * (tall ? 0.3 : 0.22), gap = u * 0.06;
+  const ruleW = u * 0.14, ruleH = Math.max(3, u * 0.008);
+  // the whole block, centred on the screen
+  const blockH = (icon ? is + gap : 0) + lines.length * lh + (sub ? gap * 0.6 + ruleH + gap * 0.6 + sfs : gap * 0.6 + ruleH);
+  let y = (H - blockH) / 2 + (1 - ease(a / 0.45)) * u * 0.035;   // drifts up a little as it appears
+  if (icon) { drawIcon(g, ch.icon, W / 2, y + is / 2, is * (0.9 + 0.1 * ease(a / 0.5)), k.accent); y += is + gap; }
+  g.fillStyle = k.ink; g.textAlign = "center"; g.textBaseline = "middle";
+  g.font = `900 ${fs}px ${fontStack(k.font)}`;
+  lines.forEach((l, i) => g.fillText(l, W / 2, y + lh * (i + 0.5)));
+  y += lines.length * lh + gap * 0.6;
+  g.fillStyle = k.accent; g.fillRect(W / 2 - ruleW / 2 * ease(a / 0.5), y, ruleW * ease(a / 0.5), ruleH);
+  if (sub) {
+    y += ruleH + gap * 0.6;
+    g.fillStyle = k.ink; g.font = `400 ${sfs}px ${fontStack(k.font)}`;
+    g.fillText(headText(sub), W / 2, y + sfs / 2, W * 0.88);
+  }
 }
 // The cover title: a poster over the opening seconds, with the video playing in a frame.
 // It starts full-screen, shrinks into its frame, and grows back out at the end.
@@ -2268,6 +2295,7 @@ function syncForms() {
   const k = V.look;
   $("#vColBg").value = k.bg; $("#vColInk").value = k.ink; $("#vColAccent").value = k.accent; $("#vColHiBox").value = k.hiBox; $("#vColHiInk").value = k.hiInk;
   $("#vFont").value = k.font; $("#vCaps").checked = k.caps;
+  document.querySelectorAll("#vChapLayout [data-layout]").forEach(b => b.setAttribute("aria-pressed", b.dataset.layout === chapLayout()));
   showEnh(); renderStyles(); renderChapList();
 }
 
@@ -2428,6 +2456,13 @@ $("#vThemes").addEventListener("click", e => {
   $(sel).addEventListener("input", e => { V.look[k] = e.target.value; V.look.theme = "custom"; updateUi(); vtick(); vSave(); }));
 $("#vFont").addEventListener("change", e => { V.look.font = e.target.value; V.look.theme = "custom"; updateUi(); lookChanged(); });
 $("#vCaps").addEventListener("change", e => { V.look.caps = e.target.checked; vtick(); vSave(); });
+$("#vChapLayout").addEventListener("click", e => {
+  const b = e.target.closest("[data-layout]"); if (!b) return;
+  V.look.chapLayout = b.dataset.layout; syncForms(); vSave();
+  // show a chapter card so the change is visible
+  const x = chaptersOnTimeline(vplan()).find(c => c.ch.card > 0);
+  if (x) vSeek(x.t0 + Math.min(0.8, x.ch.card * 0.6)); else vtick();
+});
 $("#vStyleSave").addEventListener("click", saveStyle);
 $("#vStyleName").addEventListener("keydown", e => { if (e.key === "Enter") saveStyle(); });
 // shape
@@ -2555,6 +2590,7 @@ window.hookd = {
         }
         if (l.font != null) { V.look.font = oneOf(l.font, Object.keys(FONTS), "look.font"); V.look.theme = "custom"; }
         if (l.caps != null) V.look.caps = !!l.caps;
+        if (l.chapLayout != null) V.look.chapLayout = oneOf(l.chapLayout, ["center", "top"], "look.chapLayout");
       }
       if (p.captionStyle) {
         const c = p.captionStyle;

@@ -625,7 +625,7 @@ img { max-width: 100%; }
           </div>
 
           <div class="vtab" data-panel="chap" hidden>
-            <p class="vhelp">Split a lesson into steps. A chapter shows a full-screen card with its heading and a picture, then the heading stays at the top while you talk. Your voice keeps playing underneath.</p>
+            <p class="vhelp">Split a lesson into steps. A chapter shows a full-screen card with a picture and its heading in the middle, then the heading moves to the top while you talk. Your voice keeps playing underneath.</p>
             <button type="button" class="btn primary" id="vChapAdd">Add chapter at the playhead</button>
             <p class="vhelp" id="vChapEmpty">No chapters yet. Move the playhead to where a new step starts, like "Step 1", and press Add chapter.</p>
             <ol class="vcap-list vchap-list" id="vChapList"></ol>
@@ -653,6 +653,11 @@ img { max-width: 100%; }
                 <option value="serif">Playfair (classic serif)</option>
               </select>
               <label class="check"><input type="checkbox" id="vCaps"><span>Headings in capitals</span></label>
+            </div>
+            <span class="label">Chapter cards</span>
+            <div class="seg" id="vChapLayout" role="group" aria-label="Chapter card layout">
+              <button type="button" data-layout="center" aria-pressed="true">Heading in the middle</button>
+              <button type="button" data-layout="top" aria-pressed="false">Heading on top</button>
             </div>
             <span class="label">Save for your series</span>
             <div class="vstyle-save">
