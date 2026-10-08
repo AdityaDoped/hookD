@@ -14,6 +14,8 @@ const V = {
   music: null,   // { name, buffer, vol, duck }
   // captions live in source time ({ id, src, s, e, text }), so cuts and moves carry them along
   caps: [], selCap: null, capLook: { style: "bar", size: "m", pos: "bottom", burn: true },
+  // voice and colour tools, all off until chosen
+  enh: { noise: 0, level: false, bright: 0, contrast: 0, sat: 0, warm: 0 },
 };
 const MIN_CLIP = 0.1;     // shortest piece a split or trim may leave, in seconds
 const PEAKS_PER_SEC = 100;
@@ -514,6 +516,189 @@ function parseSubs(text) {
   return out;
 }
 
+/* ---------- Voice cleanup ----------
+   Optional, and only when chosen: noise reduction and even loudness. Each video's
+   sound is processed once into a copy that both the preview and the export use. */
+const TARGET_LUFS = -14;   // what phone feeds play at
+const NOISE = { 1: { over: 1.3, floor: 0.35 }, 2: { over: 1.8, floor: 0.18 }, 3: { over: 2.4, floor: 0.08 } };
+const enhKey = () => `${V.enh.noise}:${V.enh.level ? 1 : 0}`;
+const voiceBuffer = s => (s.proc && s.procKey === enhKey() ? s.proc : s.audio);
+
+// In-place complex FFT of size N (a power of two).
+function makeFFT(N) {
+  const rev = new Uint32Array(N), cos = new Float64Array(N / 2), sin = new Float64Array(N / 2), bits = Math.log2(N);
+  for (let i = 0; i < N; i++) { let r = 0; for (let b = 0; b < bits; b++) r |= ((i >> b) & 1) << (bits - 1 - b); rev[i] = r; }
+  for (let i = 0; i < N / 2; i++) { cos[i] = Math.cos(2 * Math.PI * i / N); sin[i] = Math.sin(2 * Math.PI * i / N); }
+  return (re, im, inverse) => {
+    for (let i = 0; i < N; i++) { const j = rev[i]; if (j > i) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+    const sg = inverse ? -1 : 1;
+    for (let size = 2; size <= N; size <<= 1) {
+      const half = size >> 1, step = N / size;
+      for (let i = 0; i < N; i += size) {
+        for (let j = 0, k = 0; j < half; j++, k += step) {
+          const a = i + j, b = a + half, c = cos[k], s = sin[k] * sg;
+          const tr = re[b] * c + im[b] * s, ti = im[b] * c - re[b] * s;
+          re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+        }
+      }
+    }
+    if (inverse) for (let i = 0; i < N; i++) { re[i] /= N; im[i] /= N; }
+  };
+}
+// A biquad filter (RBJ cookbook) that keeps its state between calls.
+function biquad(type, f0, sr, Q, gainDb = 0) {
+  const w = 2 * Math.PI * f0 / sr, cw = Math.cos(w), al = Math.sin(w) / (2 * Q), A = Math.pow(10, gainDb / 40), sa = 2 * Math.sqrt(A) * al;
+  let b0, b1, b2, a0, a1, a2;
+  if (type === "highpass") { b0 = (1 + cw) / 2; b1 = -(1 + cw); b2 = b0; a0 = 1 + al; a1 = -2 * cw; a2 = 1 - al; }
+  else { b0 = A * ((A + 1) + (A - 1) * cw + sa); b1 = -2 * A * ((A - 1) + (A + 1) * cw); b2 = A * ((A + 1) + (A - 1) * cw - sa);
+    a0 = (A + 1) - (A - 1) * cw + sa; a1 = 2 * ((A - 1) - (A + 1) * cw); a2 = (A + 1) - (A - 1) * cw - sa; }
+  b0 /= a0; b1 /= a0; b2 /= a0; a1 /= a0; a2 /= a0;
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  return (x, out = x) => {
+    for (let i = 0; i < x.length; i++) {
+      const v = x[i], y = b0 * v + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+      x2 = x1; x1 = v; y2 = y1; y1 = y; out[i] = y;
+    }
+    return out;
+  };
+}
+// Integrated loudness in LUFS (ITU-R BS.1770: K-weighting, 400 ms blocks, gated).
+function loudness(chs, sr) {
+  const seg = Math.round(sr * 0.1), nSeg = Math.floor(chs[0].length / seg), segE = new Float64Array(nSeg), tmp = new Float32Array(seg);
+  for (const x of chs) {
+    const shelf = biquad("highshelf", 1681.97, sr, 0.7071752, 3.99984), hp = biquad("highpass", 38.13547, sr, 0.500327);
+    for (let k = 0; k < nSeg; k++) {
+      tmp.set(x.subarray(k * seg, k * seg + seg)); shelf(tmp); hp(tmp);
+      let e = 0; for (let i = 0; i < seg; i++) e += tmp[i] * tmp[i];
+      segE[k] += e / seg;
+    }
+  }
+  const blocks = [];
+  for (let k = 0; k + 4 <= nSeg; k++) blocks.push((segE[k] + segE[k + 1] + segE[k + 2] + segE[k + 3]) / 4);
+  const lk = e => -0.691 + 10 * Math.log10(e);
+  const abs = blocks.filter(e => lk(e) > -70);
+  if (!abs.length) return -Infinity;
+  const rel = lk(abs.reduce((a, b) => a + b, 0) / abs.length) - 10, gated = abs.filter(e => lk(e) > rel);
+  return lk(gated.reduce((a, b) => a + b, 0) / gated.length);
+}
+// Spectral noise reduction: learn the hiss from the quietest 15% of moments, then
+// turn each frequency down by how close it is to that hiss. Works in place.
+async function denoise(chs, opt, onProg) {
+  const N = 1024, H = 256, n = chs[0].length, C = chs.length, fft = makeFFT(N), bins = N / 2 + 1;
+  const win = new Float64Array(N).map((_, i) => 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N));
+  const at = (x, p) => (p >= 0 && p < n ? x[p] : 0);
+  const mid = p => { let v = 0; for (const x of chs) v += at(x, p); return v / C; };
+  const first = -(N / H - 1), last = Math.ceil(n / H), re = new Float64Array(N), im = new Float64Array(N);
+  // 1. the noise: average spectrum of the quietest frames
+  const energy = [];
+  for (let f = 0; f < Math.floor((n - N) / H); f++) { let e = 0; for (let i = 0; i < N; i += 4) { const v = mid(f * H + i); e += v * v; } energy.push([e, f]); }
+  if (energy.length < 8) return;
+  energy.sort((a, b) => a[0] - b[0]);
+  const quiet = energy.slice(0, Math.max(4, Math.floor(energy.length * 0.15))), noise = new Float64Array(bins);
+  for (const [, f] of quiet) {
+    for (let i = 0; i < N; i++) { re[i] = mid(f * H + i) * win[i]; im[i] = 0; }
+    fft(re, im, false);
+    for (let k = 0; k < bins; k++) noise[k] += Math.hypot(re[k], im[k]) / quiet.length;
+  }
+  // 2. filter every frame, overlap-adding back into the same arrays
+  const acc = chs.map(() => new Float64Array(N)), gain = new Float64Array(bins), prev = new Float64Array(bins).fill(1);
+  const res = chs.map(() => [new Float64Array(N), new Float64Array(N)]);
+  for (let f = first; f <= last; f++) {
+    const s = f * H;
+    for (let i = 0; i < N; i++) { re[i] = mid(s + i) * win[i]; im[i] = 0; }
+    fft(re, im, false);
+    for (let k = 0; k < bins; k++) {
+      const g = Math.max(opt.floor, 1 - opt.over * noise[k] / (Math.hypot(re[k], im[k]) + 1e-12));
+      gain[k] = Math.max(g, prev[k] * 0.6);   // let words fade out instead of chopping them
+    }
+    for (let k = 0; k < bins; k++) prev[k] = gain[k];
+    for (let k = 1; k < bins - 1; k++) gain[k] = (prev[k - 1] + 2 * prev[k] + prev[k + 1]) / 4;   // soften across frequencies
+    for (let c = 0; c < C; c++) {
+      const [r, m] = res[c], x = chs[c];
+      for (let i = 0; i < N; i++) { r[i] = at(x, s + i) * win[i]; m[i] = 0; }
+      fft(r, m, false);
+      for (let k = 0; k < bins; k++) { r[k] *= gain[k]; m[k] *= gain[k]; if (k && k < N / 2) { r[N - k] = r[k]; m[N - k] = -m[k]; } }
+      fft(r, m, true);
+      const a = acc[c];
+      for (let i = 0; i < N; i++) a[(((s + i) % N) + N) % N] += r[i] * win[i] / 1.5;
+      // samples s..s+H are complete now; later frames start beyond them
+      for (let p = s; p < s + H; p++) { const slot = ((p % N) + N) % N; if (p >= 0 && p < n) x[p] = a[slot]; a[slot] = 0; }
+    }
+    if ((f - first) % 2000 === 0) { onProg((f - first) / (last - first)); await nextTask(); }
+  }
+}
+// Gentle compression so quiet and loud words sit closer together (3:1 above the voice's usual level).
+function compress(chs, sr, thrDb) {
+  const n = chs[0].length, att = Math.exp(-1 / (sr * 0.005)), rel = Math.exp(-1 / (sr * 0.12)), ratio = 3;
+  let env = 0;
+  for (let i = 0; i < n; i++) {
+    let v = 0; for (const x of chs) v = Math.max(v, x[i] * x[i]);
+    env = v > env ? att * env + (1 - att) * v : rel * env + (1 - rel) * v;
+    const db = 10 * Math.log10(env + 1e-12), over = db - thrDb;
+    if (over > 0) { const g = Math.pow(10, -over * (1 - 1 / ratio) / 20); for (const x of chs) x[i] *= g; }
+  }
+}
+// Peak limiter: looks 5 ms ahead so the level eases down before a loud moment.
+function limit(chs, sr, ceil) {
+  const n = chs[0].length, LA = Math.round(sr * 0.005), ring = new Int32Array(LA + 2);
+  const peak = i => { let v = 0; for (const x of chs) v = Math.max(v, Math.abs(x[i])); return v; };
+  let head = 0, tail = 0, g = 1;
+  const a = 1 - Math.exp(-3 / LA), rel = 1 - Math.exp(-1 / (sr * 0.08)), cap = LA + 2;
+  for (let j = 0; j < Math.min(LA, n); j++) { while (tail > head && peak(ring[(tail - 1) % cap]) <= peak(j)) tail--; ring[tail++ % cap] = j; }
+  for (let i = 0; i < n; i++) {
+    const j = i + LA;   // bring the next sample into the window [i, i + LA]
+    if (j < n) { while (tail > head && peak(ring[(tail - 1) % cap]) <= peak(j)) tail--; ring[tail++ % cap] = j; }
+    while (ring[head % cap] < i) head++;
+    const target = Math.min(1, ceil / Math.max(1e-9, peak(ring[head % cap])));
+    g = target < g ? g + (target - g) * a : g + (target - g) * rel;
+    for (const x of chs) x[i] = clamp(x[i] * g, -ceil, ceil);
+  }
+}
+async function cleanVoice(buf, enh, onProg) {
+  const sr = buf.sampleRate, chs = Array.from({ length: buf.numberOfChannels }, (_, c) => Float32Array.from(buf.getChannelData(c)));
+  const before = loudness(chs, sr);
+  if (enh.noise) {
+    for (const x of chs) biquad("highpass", 80, sr, 0.707)(x);   // rumble from fans, traffic, handling
+    await denoise(chs, NOISE[enh.noise], p => onProg(p * (enh.level ? 0.8 : 1)));
+  }
+  if (enh.level) {
+    const L = loudness(chs, sr);
+    if (isFinite(L)) {
+      compress(chs, sr, L + 4);
+      const g = clamp(Math.pow(10, (TARGET_LUFS - loudness(chs, sr)) / 20), 0.1, 40);
+      for (const x of chs) for (let i = 0; i < x.length; i++) x[i] *= g;
+      limit(chs, sr, Math.pow(10, -1.5 / 20));
+    }
+  }
+  onProg(1);
+  const out = new AudioBuffer({ length: buf.length, numberOfChannels: chs.length, sampleRate: sr });
+  chs.forEach((x, c) => out.copyToChannel(x, c));
+  return { buffer: out, before, after: loudness(chs, sr) };
+}
+let procJob = 0, procBusy = null;
+// Bring every video's processed sound up to date with the chosen settings.
+function processVoices() {
+  const job = ++procJob;
+  procBusy = (async () => {
+    const key = enhKey(), prog = $("#vEnhProg"), note = $("#vEnhNote");
+    if (key === "0:0") { soundRefresh(); note.textContent = ""; prog.hidden = true; return; }
+    const todo = V.sources.filter(s => s.audio && s.procKey !== key && V.clips.some(c => c.src === s));
+    for (let i = 0; i < todo.length; i++) {
+      const s = todo[i];
+      prog.hidden = false;
+      const r = await cleanVoice(s.audio, V.enh, p => { prog.value = (i + p) / todo.length; note.textContent = `Working on the sound… ${Math.round((i + p) / todo.length * 100)}%`; });
+      if (job !== procJob) return;
+      Object.assign(s, { proc: r.buffer, procKey: key, lufsBefore: r.before, lufsAfter: r.after });
+    }
+    prog.hidden = true;
+    const used = V.sources.filter(s => s.proc && s.procKey === key && V.clips.some(c => c.src === s));
+    const avg = k => used.reduce((a, s) => a + (isFinite(s[k]) ? s[k] : 0), 0) / Math.max(1, used.length);
+    note.textContent = used.length ? (V.enh.level ? `Voice level: ${avg("lufsBefore").toFixed(0)} → ${avg("lufsAfter").toFixed(0)} LUFS.` : "Background noise reduced.") : "";
+    soundRefresh();
+  })();
+  return procBusy;
+}
+
 /* ---------- Picture: shared by the preview and the export ---------- */
 const SHAPES = { original: null, wide: [16, 9], square: [1, 1], portrait: [4, 5], vertical: [9, 16] };
 const even = x => Math.max(2, Math.round(x / 2) * 2);
@@ -541,6 +726,7 @@ function drawMedia(g, W, H, m, scale, alpha) {
   if (!dw || !dh) return;
   const fit = Math.min(W / dw, H / dh), cover = Math.max(W / dw, H / dh);
   g.save(); g.globalAlpha = alpha;
+  g.filter = colourFilter();
   if (V.fit === "fit" && (dw * fit < W - 2 || dh * fit < H - 2)) {
     // the bars show a blurred, darkened copy of the same picture
     const bw = 72, bh = Math.max(1, Math.round(72 * H / W));
@@ -552,7 +738,18 @@ function drawMedia(g, W, H, m, scale, alpha) {
     g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(0, 0, W, H);
   }
   drawRotated(g, m.img, m.w, m.h, m.rot, W / 2, H / 2, (V.fit === "fill" ? cover : fit) * scale);
+  // warmth: a soft orange (or blue) wash over the picture
+  if (V.enh.warm) {
+    g.filter = "none"; g.globalCompositeOperation = "soft-light";
+    g.globalAlpha = alpha * Math.abs(V.enh.warm) / 50 * 0.55;
+    g.fillStyle = V.enh.warm > 0 ? "#FF8A2A" : "#2A8CFF"; g.fillRect(0, 0, W, H);
+  }
   g.restore();
+}
+function colourFilter() {
+  const e = V.enh;
+  if (!e.bright && !e.contrast && !e.sat) return "none";
+  return `brightness(${1 + e.bright / 100}) contrast(${1 + e.contrast / 100}) saturate(${1 + e.sat / 100})`;
 }
 function drawTitle(g, W, H, alpha) {
   const u = Math.min(W, H), fs = Math.round(u * 0.085), sfs = Math.round(u * 0.042), lh = fs * 1.15;
@@ -629,12 +826,13 @@ function setTrans(ci, tr) {
 }
 
 /* ---------- Preview ----------
-   A clock runs the timeline; two hidden video players follow it (one per
-   clip on screen, or parked on the next clip), and each frame is drawn onto a
-   canvas with the same code the export uses. */
+   The sound is scheduled on the audio clock from the same (cleaned) sound the
+   export uses, fades and all. Two silent video players follow that clock (one
+   per clip on screen, or parked on the next clip), and each frame is drawn onto
+   a canvas with the same code the export uses. */
 const vA = $("#vA"), vB = $("#vB"), els = [vA, vB];
-const pv = { cv: $("#vCanvas"), box: $("#vPrevBox"), W: 1280, H: 720, clock: null, map: new Map() };
-let mus = null;
+const pv = { cv: $("#vCanvas"), box: $("#vPrevBox"), W: 1280, H: 720, map: new Map() };
+let pa = null;   // the sound now playing: { nodes, out, t0, T }
 function sizePreview() {
   const [W, H] = outSize(), stage = $(".vstage"), ar = W / H;
   pv.W = W; pv.H = H;
@@ -644,43 +842,77 @@ function sizePreview() {
   const cw = Math.round(w * dpr), ch = Math.round(h * dpr);
   if (pv.cv.width !== cw || pv.cv.height !== ch) { pv.cv.width = cw; pv.cv.height = ch; }
 }
-const nowT = () => V.playing && pv.clock ? pv.clock.T + (performance.now() - pv.clock.perf) / 1000 : V.T;
+// The moment being heard: the audio clock, less the delay on the way to the speakers.
+function nowT() {
+  if (!V.playing || !pa) return V.T;
+  const c = audio(), lat = c.outputLatency || c.baseLatency || 0;
+  return pa.T + Math.max(0, c.currentTime - pa.t0 - lat);
+}
 function vPlay() {
   if (!V.clips.length || V.exporting) return;
   const P = vplan();
   if (V.T >= P.total - 0.02) V.T = 0;
-  V.playing = true; pv.clock = { perf: performance.now(), T: V.T };
-  musicStart();
+  V.playing = true;
+  soundStart(P, V.T);
   vtick(); updateUi();
 }
 function vPause() {
   if (!V.playing) return;
   V.T = nowT(); V.playing = false;
-  els.forEach(e => e.pause()); musicStop();
+  els.forEach(e => e.pause()); soundStop();
   updateUi(); vtick();
 }
 function vToggle() { V.playing ? vPause() : vPlay(); }
 function vSeek(T) {
   const was = V.playing;
-  if (was) { V.playing = false; els.forEach(e => e.pause()); musicStop(); }
+  if (was) { V.playing = false; els.forEach(e => e.pause()); soundStop(); }
   V.T = clamp(T, 0, vtotal());
   if (was) vPlay(); else vtick();
 }
+// Volume curve points every 10 ms, for setValueCurveAtTime.
+function curveOf(fn, from, to) {
+  const n = Math.max(2, Math.ceil((to - from) * 100) + 1), a = new Float32Array(n);
+  for (let i = 0; i < n; i++) a[i] = fn(from + (to - from) * i / (n - 1));
+  return a;
+}
+function soundStart(P, T) {
+  soundStop();
+  const c = audio(), t0 = c.currentTime + 0.1, out = c.createGain(), nodes = [];
+  out.connect(c.destination);
+  for (const it of P.items) {
+    if (it.kind !== "clip" || it.end <= T) continue;
+    const s = it.c.src, buf = voiceBuffer(s);
+    if (!buf) continue;
+    let from = Math.max(T, it.start), off = it.c.in + (from - it.start) - s.aOff;
+    if (off < 0) { from -= off; off = 0; }   // this video's sound starts a moment after its picture
+    if (it.end - from < 0.01) continue;
+    const src = c.createBufferSource(), g = c.createGain();
+    src.buffer = buf; src.connect(g).connect(out);
+    g.gain.setValueCurveAtTime(curveOf(t => gainOf(it, t), from, it.end), t0 + from - T, it.end - from);
+    src.start(t0 + from - T, off, it.end - from);
+    nodes.push(src);
+  }
+  if (V.music && P.total - T > 0.01) {
+    const src = c.createBufferSource(), g = c.createGain();
+    src.buffer = V.music.buffer; src.loop = true; src.connect(g).connect(out);
+    g.gain.setValueCurveAtTime(curveOf(t => musicGain(P, t), T, P.total), t0, P.total - T);
+    src.start(t0, T % src.buffer.duration);
+    nodes.push(src);
+  }
+  pa = { nodes, out, t0, T };
+}
+function soundStop() {
+  if (!pa) return;
+  pa.nodes.forEach(n => { try { n.stop(); } catch (e) {} });
+  pa.out.disconnect(); pa = null;
+}
+// Restart the sound from here after its settings change mid-play.
+function soundRefresh() { if (V.playing) { V.T = nowT(); soundStart(vplan(), V.T); } }
 function stepFrames(n) {
   if (!V.clips.length) return;
   const L = locate(V.T), c = V.clips[Math.max(0, L.i)];
   vPause(); vSeek(V.T + n / (c.src.fps || 30));
 }
-function musicStart() {
-  musicStop();
-  if (!V.music) return;
-  const c = audio(), s = c.createBufferSource(), g = c.createGain();
-  s.buffer = V.music.buffer; s.loop = true; g.gain.value = 0;
-  s.connect(g).connect(c.destination);
-  s.start(0, V.T % s.buffer.duration);
-  mus = { s, g };
-}
-function musicStop() { if (mus) { try { mus.s.stop(); } catch (e) {} mus = null; } }
 
 // Put the players on the clips the timeline needs at time T.
 function syncPlayers(P, T) {
@@ -702,13 +934,17 @@ function syncPlayers(P, T) {
     if (!e) continue;
     pv.map.set(w.it.c.id, e);
     if (e.dataset.src !== String(c.src.id)) { e.src = c.src.url; e.dataset.src = c.src.id; }
-    const off = Math.abs(e.currentTime - w.t);
+    const drift = e.currentTime - w.t, off = Math.abs(drift);
+    e.muted = true;   // the sound comes from the audio clock (see soundStart)
     if (w.on && V.playing) {
-      e.volume = clamp(gainOf(w.it, T), 0, 1);
-      if (off > 0.25 || (e.paused && off > 0.04)) e.currentTime = w.t;
+      // a player takes a moment to get going, so it starts a little ahead
+      if (e.paused) { e.currentTime = Math.min(c.out, w.t + 0.12); e.playbackRate = 1; }
+      else if (off > 0.5) { e.currentTime = w.t; e.playbackRate = 1; }
+      else e.playbackRate = clamp(1 - drift * 3, 0.8, 1.25);   // ease back into step with the sound
       if (e.paused) e.play().catch(() => {});
     } else {
       if (!e.paused) e.pause();
+      e.playbackRate = 1;
       if (off > 0.02) e.currentTime = w.t;
     }
   }
@@ -722,7 +958,6 @@ function vtick() {
   $("#vEmpty").hidden = V.clips.length > 0;
   if (!V.clips.length) { const g = pv.cv.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, pv.cv.width, pv.cv.height); return; }
   syncPlayers(P, V.T);
-  if (mus) mus.g.gain.setTargetAtTime(musicGain(P, V.T), audio().currentTime, 0.03);
   // draw only when every picture on screen is ready, so seeking never flashes black
   const st = layersAt(P, V.T), imgs = new Map();
   st.cap = capAt(P, V.T); st.t = V.T;
@@ -1126,7 +1361,7 @@ function audioBlock(P, sr, a, n) {
     const s = it.c.src, cS = Math.round(it.start * sr), cE = Math.round(it.end * sr);
     const j0 = Math.max(a, cS), j1 = Math.min(a + n, cE);
     if (j1 <= j0) continue;
-    const sl = s.audio.getChannelData(0), sr2 = s.audio.numberOfChannels > 1 ? s.audio.getChannelData(1) : sl;
+    const vb = voiceBuffer(s), sl = vb.getChannelData(0), sr2 = vb.numberOfChannels > 1 ? vb.getChannelData(1) : sl;
     const base = Math.round((it.c.in - it.start - s.aOff) * sr);
     let gain = 0;
     for (let j = j0; j < j1; j++) {
@@ -1169,6 +1404,8 @@ async function vExport() {
   let venc = null, aenc = null;
   const readers = new Map();
   try {
+    // the cleaned-up sound must be ready before it's written out
+    if (enhKey() !== "0:0") { $("#vNote").textContent = "Finishing the sound cleanup…"; await processVoices(); }
     const P = vplan(), [W, H] = outSize(), s0 = V.clips[0].src;
     const fps = [24, 25, 30, 50, 60].reduce((a, b) => Math.abs(b - s0.fps) < Math.abs(a - s0.fps) ? b : a);
     const bitrate = clamp(Math.round(W * H * fps * 0.14), 2e6, 16e6);
@@ -1273,6 +1510,7 @@ async function addVideos(files) {
   }
   const msg = (added.length ? `Added ${added.length} video${added.length > 1 ? "s" : ""}. ` : "") + (failed.length ? `Couldn't open ${failed.join("; ")}.` : "");
   vStatus(msg.trim(), failed.length > 0);
+  if (added.length && enhKey() !== "0:0") processVoices();
   const silent = added.filter(s => s.noSound);
   if (silent.length) toast(`${silent.map(s => s.name).join(", ")} has no sound Hookd can read, so it will be silent.`);
 }
@@ -1342,7 +1580,7 @@ function projectData() {
     sources: V.sources.map(s => ({ id: s.id, name: s.name, color: s.color })),
     clips: V.clips.map(c => ({ id: c.id, src: c.src.id, in: c.in, out: c.out, trans: c.trans || null })),
     caps: V.caps.map(k => ({ id: k.id, src: k.src.id, s: k.s, e: k.e, text: k.text })),
-    title: V.title, shape: V.shape, fit: V.fit, capLook: V.capLook,
+    title: V.title, shape: V.shape, fit: V.fit, capLook: V.capLook, enh: V.enh,
     music: V.music ? { name: V.music.name, vol: V.music.vol, duck: V.music.duck } : null,
   };
 }
@@ -1372,7 +1610,7 @@ async function vRestore() {
   }
   V.clips = p.clips.filter(c => byId.has(c.src)).map(c => ({ ...c, src: byId.get(c.src) }));
   V.caps = (p.caps || []).filter(k => byId.has(k.src)).map(k => ({ ...k, src: byId.get(k.src) }));
-  Object.assign(V.title, p.title || {}); Object.assign(V.capLook, p.capLook || {});
+  Object.assign(V.title, p.title || {}); Object.assign(V.capLook, p.capLook || {}); Object.assign(V.enh, p.enh || {});
   V.shape = p.shape || V.shape; V.fit = p.fit || V.fit;
   V.nextId = Math.max(p.nextId || 1, ...V.sources.map(s => s.id + 1), ...V.clips.map(c => c.id + 1), ...V.caps.map(k => k.id + 1));
   if (p.name) $("#vName").value = p.name;
@@ -1385,6 +1623,7 @@ async function vRestore() {
   // put the forms back as they were
   $("#vTitleOn").checked = V.title.on; $("#vTitleText").value = V.title.text; $("#vTitleSub").value = V.title.sub; $("#vTitleDur").value = String(V.title.dur);
   if (V.music) { $("#vMusicVol").value = Math.round(V.music.vol * 100); $("#vDuck").checked = V.music.duck; }
+  showEnh();
   V.sel = V.clips.length ? 0 : -1;
   vStatus(failed ? `Opened your last project, but ${failed} file${failed > 1 ? "s" : ""} couldn't be read back. Add ${failed > 1 ? "them" : "it"} again.` : "Picked up where you left off.", failed > 0);
   if (!failed) setTimeout(() => { if ($("#vStatus").textContent === "Picked up where you left off.") vStatus(""); }, 4000);
@@ -1393,6 +1632,7 @@ async function vRestoreAll() {
   try { await vRestore(); } catch (e) {} finally { vRestoring = false; }
   V.version++;
   sizeTimeline(); sizePreview(); renderCapList(); vtick(); updateUi();
+  if (enhKey() !== "0:0") processVoices();
   // tidy away stored videos the project no longer uses
   try {
     const keep = new Set(V.sources.map(s => "src-" + s.id).concat(V.music ? ["music"] : []));
@@ -1413,6 +1653,7 @@ async function startOver() {
   V.sources.forEach(s => URL.revokeObjectURL(s.url));
   Object.assign(V, { sources: [], clips: [], caps: [], undo: [], redo: [], sel: -1, selJoin: -1, selCap: null, T: 0, music: null });
   Object.assign(V.title, { on: false, text: "", sub: "", dur: 3 });
+  Object.assign(V.enh, { noise: 0, level: false, bright: 0, contrast: 0, sat: 0, warm: 0 }); showEnh();
   $("#vTitleOn").checked = false; $("#vTitleText").value = ""; $("#vTitleSub").value = ""; $("#vName").value = "";
   els.forEach(e => { e.removeAttribute("src"); e.dataset.src = ""; e.itemId = null; e.load(); });
   try { await vstore.clear(); } catch (e) {}
@@ -1732,8 +1973,8 @@ $("#vTransAll").addEventListener("click", () => {
 $("#vMusicAdd").addEventListener("click", () => $("#vMusicIn").click());
 $("#vMusicIn").addEventListener("change", e => { addMusic(e.target.files[0]); e.target.value = ""; });
 $("#vMusicDel").addEventListener("click", () => { vPause(); V.music = null; vstore.delFile("music").catch(() => {}); settingsChanged(); vStatus("Removed the music."); });
-$("#vMusicVol").addEventListener("input", e => { if (V.music) { V.music.vol = e.target.value / 100; V.version++; vSave(); } });
-$("#vDuck").addEventListener("change", e => { if (V.music) { V.music.duck = e.target.checked; V.version++; vSave(); } });
+$("#vMusicVol").addEventListener("input", e => { if (V.music) { V.music.vol = e.target.value / 100; V.version++; vSave(); soundRefresh(); } });
+$("#vDuck").addEventListener("change", e => { if (V.music) { V.music.duck = e.target.checked; V.version++; vSave(); soundRefresh(); } });
 // title card
 $("#vTitleOn").addEventListener("change", e => { V.title.on = e.target.checked; settingsChanged(); if (V.title.on) vSeek(0); });
 $("#vTitleText").addEventListener("input", e => { V.title.text = e.target.value; vtick(); vSave(); });
@@ -1753,6 +1994,17 @@ $("#vCapBurn").addEventListener("change", e => { V.capLook.burn = e.target.check
   const b = e.target.closest(`[data-${key}]`); if (!b) return;
   V.capLook[key] = b.dataset[key]; vtick(); updateUi(); vSave();
 }));
+// enhance: voice and colour
+function showEnh() {
+  $("#vNoise").value = String(V.enh.noise); $("#vLevel").checked = V.enh.level;
+  for (const k of ["Bright", "Contrast", "Sat", "Warm"]) { const v = V.enh[k.toLowerCase()]; $("#v" + k).value = v; $("#v" + k + "Out").textContent = v > 0 ? "+" + v : v; }
+}
+$("#vNoise").addEventListener("change", e => { V.enh.noise = +e.target.value; vSave(); processVoices(); });
+$("#vLevel").addEventListener("change", e => { V.enh.level = e.target.checked; vSave(); processVoices(); });
+document.querySelectorAll(".vsliders input").forEach(inp => inp.addEventListener("input", () => {
+  V.enh[inp.dataset.k] = +inp.value; showEnh(); vtick(); vSave();
+}));
+$("#vColorReset").addEventListener("click", () => { Object.assign(V.enh, { bright: 0, contrast: 0, sat: 0, warm: 0 }); showEnh(); vtick(); vSave(); });
 // backup for when the page isn't drawing (another tab in front): still honour the cuts
 els.forEach(el => el.addEventListener("timeupdate", () => { if (V.playing && document.hidden) vtick(); }));
 els.forEach(el => el.addEventListener("error", () => {

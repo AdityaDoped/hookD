@@ -238,8 +238,12 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
   .vtools-main { height: max(330px, calc(56vh - 190px)); overflow-y: auto; align-content: start; overscroll-behavior: contain; }
   .vtools-main .vtabs { position: sticky; top: -18px; z-index: 1; box-shadow: 0 -18px 0 var(--surface), 0 8px 0 var(--surface); }
 }
-.vtabs { display: grid; grid-template-columns: repeat(3, 1fr); border-radius: 14px; }
-.vtabs button { padding: 6px 6px; font-size: 13px; border-radius: 11px; }
+.vtabs { display: grid; grid-template-columns: repeat(4, auto); border-radius: 14px; }
+.vtabs button { padding: 6px 4px; font-size: 12.5px; border-radius: 11px; }
+.vsub { font-weight: 600; font-size: 14px; }
+.vsliders { grid-template-columns: auto 1fr 2.5em; align-items: center; gap: 8px 10px; }
+.vsliders label { font-size: 13.5px; font-weight: 600; }
+.vsliders output { font: 600 12.5px var(--mono); color: var(--muted); text-align: right; }
 .vcap-auto { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px 10px; }
 .vcap-auto select { min-width: 0; font-size: 13.5px; }
 .vtab progress { width: 100%; accent-color: var(--accent); height: 6px; }
@@ -528,6 +532,7 @@ img { max-width: 100%; }
             <button type="button" data-tab="music" aria-pressed="false">Music</button>
             <button type="button" data-tab="title" aria-pressed="false">Title</button>
             <button type="button" data-tab="shape" aria-pressed="false">Shape</button>
+            <button type="button" data-tab="enh" aria-pressed="false">Enhance</button>
           </div>
 
           <div class="vtab" data-panel="clips">
@@ -593,6 +598,31 @@ img { max-width: 100%; }
             <label class="check"><input type="checkbox" id="vCapBurn" checked><span>Show captions in the exported video<small>Everyone sees them, styled as above.</small></span></label>
             <button type="button" class="btn quiet" id="vCapSrt">Save captions as .srt</button>
             <p class="vhelp">An .srt file can be added to a LinkedIn post separately, so viewers can switch captions on or off.</p>
+          </div>
+
+          <div class="vtab" data-panel="enh" hidden>
+            <span class="label">Voice</span>
+            <div class="vform">
+              <label for="vNoise" class="vsub">Background noise</label>
+              <select id="vNoise">
+                <option value="0">Leave as it is</option>
+                <option value="1">Reduce a little</option>
+                <option value="2">Reduce</option>
+                <option value="3">Reduce a lot</option>
+              </select>
+              <label class="check"><input type="checkbox" id="vLevel"><span>Even out loudness<small>Smooths loud and quiet moments, matches every clip, and brings the voice up to the volume of other posts in the feed.</small></span></label>
+              <progress id="vEnhProg" max="1" value="0" hidden></progress>
+              <small class="vhelp" id="vEnhNote" aria-live="polite"></small>
+            </div>
+            <span class="label">Colour</span>
+            <div class="vform vsliders">
+              <label for="vBright">Brightness</label><input type="range" id="vBright" min="-50" max="50" value="0" data-k="bright"><output id="vBrightOut" for="vBright">0</output>
+              <label for="vContrast">Contrast</label><input type="range" id="vContrast" min="-50" max="50" value="0" data-k="contrast"><output id="vContrastOut" for="vContrast">0</output>
+              <label for="vSat">Saturation</label><input type="range" id="vSat" min="-50" max="50" value="0" data-k="sat"><output id="vSatOut" for="vSat">0</output>
+              <label for="vWarm">Warmth</label><input type="range" id="vWarm" min="-50" max="50" value="0" data-k="warm"><output id="vWarmOut" for="vWarm">0</output>
+            </div>
+            <button type="button" class="btn quiet" id="vColorReset">Reset colour</button>
+            <p class="vhelp">Applies to the whole video. Nothing changes until you choose it.</p>
           </div>
 
           <div class="vtab" data-panel="trans" hidden>
@@ -675,8 +705,8 @@ img { max-width: 100%; }
       </aside>
       <div class="vstage">
         <div class="vprev" id="vPrevBox">
-          <video id="vA" playsinline preload="auto"></video>
-          <video id="vB" playsinline preload="auto"></video>
+          <video id="vA" playsinline muted preload="auto"></video>
+          <video id="vB" playsinline muted preload="auto"></video>
           <canvas id="vCanvas" role="img" aria-label="Preview of your video"></canvas>
           <div class="vempty" id="vEmpty">Add a video to start editing</div>
         </div>
