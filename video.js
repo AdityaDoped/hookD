@@ -462,12 +462,13 @@ function chapterAt(P, t) {
   for (const x of chaptersOnTimeline(P)) { if (x.t0 > t) break; if (t < x.t1) hitCh = x; }
   return hitCh;
 }
-// When the series banner shows: from the start of the video (after a title card).
+// When the series banner shows: from the start of the video, after a title card or cover.
 function bannerSpan(P) {
   if (!V.banner.on || !V.banner.text.trim() || !P.items.length) return null;
   const first = P.items.find(it => it.kind === "clip");
   if (!first) return null;
-  const t0 = first.start + (first.inT ? first.inT.ov + first.inT.h : 0);
+  let t0 = first.start + (first.inT ? first.inT.ov + first.inT.h : 0);
+  if (V.title.on && V.title.style === "cover") t0 = Math.max(t0, V.title.dur);
   return { t0, t1: V.banner.dur ? Math.min(P.total, t0 + V.banner.dur) : P.total };
 }
 
@@ -843,13 +844,22 @@ function fitFont(g, text, weight, fs, maxW) {
   if (w > maxW) { fs = Math.max(8, Math.floor(fs * maxW / w)); g.font = `${weight} ${fs}px ${fontStack(V.look.font)}`; }
   return fs;
 }
+// A title in at most three lines (wrapLines keeps three), shrinking the font until all of it fits.
+function fitLines(g, text, weight, fs, maxW) {
+  for (;;) {
+    g.font = `${weight} ${fs}px ${fontStack(V.look.font)}`;
+    const lines = wrapLines(g, text, maxW);
+    if (lines.join(" ") === text.replace(/\s+/g, " ") || fs <= 10) return { lines, fs };
+    fs = Math.floor(fs * 0.9);
+  }
+}
 function drawTitle(g, W, H, alpha) {
-  const k = V.look, u = Math.min(W, H), fs = Math.round(u * 0.085), sfs = Math.round(u * 0.042), lh = fs * 1.15;
+  const k = V.look, u = Math.min(W, H), sfs = Math.round(u * 0.042);
   g.save(); g.globalAlpha = alpha;
   g.fillStyle = k.bg; g.fillRect(0, 0, W, H);
   g.textAlign = "center"; g.textBaseline = "alphabetic";
-  g.font = `700 ${fs}px ${fontStack(k.font)}`;
-  const lines = wrapLines(g, headText(V.title.text.trim() || "Your title here"), W * 0.84), sub = V.title.sub.trim();
+  const { lines, fs } = fitLines(g, headText(V.title.text.trim() || "Your title here"), 700, Math.round(u * 0.085), W * 0.84);
+  const lh = fs * 1.15, sub = V.title.sub.trim();
   const blockH = (lines.length - 1) * lh + fs * 0.75 + fs * 0.5 + Math.max(3, u * 0.008) + (sub ? sfs * 1.7 : 0);
   let y = H / 2 - blockH / 2 + fs * 0.75;
   g.fillStyle = k.ink;
@@ -956,9 +966,8 @@ function drawCover(g, W, H, a, dur, L, m) {
   }
   // title box with an outline, and the second line under the title
   const T = R.text, title = headText(V.title.text.trim() || "Your title here"), sub = V.title.sub.trim();
-  const fs =Math.round(u * (H > W ? 0.07 : 0.05)), sfs = Math.round(fs * 0.62);
-  g.font = `900 ${fs}px ${fontStack(k.font)}`;
-  const lines = wrapLines(g, title, T.w - fs), lh = fs * 1.2, boxH = lines.length * lh + fs * 0.9 + (sub ? sfs * 1.6 : 0);
+  const fs0 = Math.round(u * (H > W ? 0.07 : 0.05)), sfs = Math.round(fs0 * 0.62);
+  const { lines, fs } = fitLines(g, title, 900, fs0, T.w - fs0), lh = fs * 1.2, boxH = lines.length * lh + fs * 0.9 + (sub ? sfs * 1.6 : 0);
   g.lineWidth = Math.max(1.5, u * 0.004); g.strokeStyle = k.ink; g.strokeRect(T.x, T.y, T.w, boxH);
   g.fillStyle = k.ink; g.textAlign = "center"; g.textBaseline = "middle";
   lines.forEach((l, i) => g.fillText(l, T.x + T.w / 2, T.y + fs * 0.45 + lh * (i + 0.5)));
