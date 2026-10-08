@@ -5,9 +5,10 @@
 // bundler), loaded on first use so a failure (offline, blocked) comes back as a message.
 const LIB = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1/dist/transformers.min.js";
 
+// each model pinned to an exact version, so an update on Hugging Face can't change it unseen
 const MODELS = {
-  base: "onnx-community/whisper-base",
-  small: "onnx-community/whisper-small",
+  base: { id: "onnx-community/whisper-base", revision: "1846881b6b3a3024392c1eea3ad983695bc23925" },
+  small: { id: "onnx-community/whisper-small", revision: "36050c46d777d46dc4b5f43f6d90574fc38f8732" },
 };
 let asr = null, loaded = "";
 
@@ -22,7 +23,8 @@ async function load(model, device) {
   // blob: script, which the site's security policy (rightly) refuses to run
   lib.env.useWasmCache = false;
   const files = new Map();
-  asr = await lib.pipeline("automatic-speech-recognition", MODELS[model], {
+  asr = await lib.pipeline("automatic-speech-recognition", MODELS[model].id, {
+    revision: MODELS[model].revision,
     device,
     dtype: device === "webgpu" ? { encoder_model: "fp32", decoder_model_merged: "q4" } : "q8",
     progress_callback: p => {

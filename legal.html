@@ -40,38 +40,45 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line);
   <nav class="toc" aria-label="On this page">
     <a href="#privacy">Privacy</a>
     <a href="#terms">Terms of use</a>
-    <a href="#copyright">Copyright &amp; your music</a>
+    <a href="#copyright">Copyright &amp; your content</a>
     <a href="#credits">Open source</a>
     <a href="#contact">Contact</a>
   </nav>
 
   <h2 id="privacy">Privacy</h2>
-  <p class="box"><strong>The short version:</strong> your songs never leave your device. Hookd has no accounts, no cookies, no ads and no analytics.</p>
+  <p class="box"><strong>The short version:</strong> your songs and videos never leave your device. Hookd has no accounts, no cookies, no ads and no analytics.</p>
   <ul>
-    <li><strong>Your songs and mashups</strong> are opened, mixed and saved entirely inside your browser. They are never uploaded to Hookd or anyone else.</li>
-    <li><strong>What's saved on your device:</strong> so a refresh doesn't lose your work, Hookd keeps your songs and settings in your browser's local storage (IndexedDB). Only this browser on this device can read them. Tap <em>Start over</em> or clear this site's data in your browser settings to delete them.</li>
-    <li><strong>What other services see:</strong> to load the page, your browser connects to the host (Vercel), to Google Fonts for the typefaces, and to jsDelivr and cdnjs (Cloudflare) for open-source code libraries. Like any website request, these services receive your IP address and basic browser details, and they may keep short-term logs under their own privacy policies. None of them receive your songs.</li>
-    <li><strong>Automatic captions:</strong> only if you use them, your browser downloads a speech-recognition model (Whisper) from Hugging Face once and keeps it. The listening happens on your device; your video's sound is never sent to Hugging Face or anyone else.</li>
-    <li><strong>Vocals only / Beat only:</strong> only if you use them, your browser downloads a vocal-separation model (Demucs, about 170 MB) from Hugging Face once and keeps it. The separating happens on your device; your songs are never sent anywhere.</li>
-    <li><strong>Match keys:</strong> only if you turn it on, your browser downloads a small pitch-shifting library from jsDelivr. Your songs stay on your device.</li>
+    <li><strong>Your songs, videos, mashups and edits</strong> are opened, processed and saved entirely inside your browser. They are never uploaded to Hookd or anyone else.</li>
+    <li><strong>What's saved on your device:</strong> so a refresh doesn't lose your work, Hookd keeps your songs, video projects (the videos, music and cover picture you add, plus your edits) and settings in your browser's storage (IndexedDB), and the styles you save for a series in local storage. Only this browser on this device can read them. <em>Start over</em> deletes a project; clearing this site's data in your browser settings deletes everything.</li>
+    <li><strong>Downloaded AI models:</strong> if you use automatic captions or Vocals only / Beat only, the browser keeps the models it downloaded (from about 80 MB up to several hundred MB) so it doesn't fetch them again. <em>Start over</em> doesn't remove them; clearing this site's data does.</li>
+    <li><strong>What other services see:</strong> to load the page, your browser connects to the host (Vercel), to Google Fonts for the typefaces, and to jsDelivr and cdnjs (Cloudflare) for open-source code libraries. If you use automatic captions or Vocals only / Beat only, it also connects to Hugging Face to download the models. Like any website request, these services receive your IP address and basic browser details, and they may keep short-term logs under their own privacy policies. None of them receive your songs or videos.</li>
+    <li><strong>Automatic captions:</strong> only if you use them, your browser downloads a speech-recognition model (Whisper) from Hugging Face once. The listening happens on your device; your video's sound is never sent to Hugging Face or anyone else.</li>
+    <li><strong>Vocals only / Beat only:</strong> only if you use them, your browser downloads a vocal-separation model (Demucs, about 170 MB) from Hugging Face once. The separating happens on your device; your songs are never sent anywhere.</li>
+    <li><strong>Match keys:</strong> the pitch shifting runs on your device with a small library that is part of this site.</li>
+    <li><strong>AI assistants:</strong> Hookd publishes a <a href="/llms.txt">guide for AI assistants</a> so a browser assistant you choose to use (such as Claude in Chrome) can help you edit. If you let an assistant work on this page, it can see the page and your project, as on any website, under that assistant's own privacy terms. Hookd itself never sends your work to any AI service.</li>
     <li><strong>What we collect:</strong> nothing. Hookd doesn't run a server or a database, so there's nothing about you for us to store, sell or share.</li>
   </ul>
 
   <h2 id="terms">Terms of use</h2>
   <ul>
     <li>Hookd is a free tool, provided <strong>as is</strong>, with no warranty of any kind. It may change, break or go offline at any time.</li>
-    <li>You're responsible for the files you add and for what you do with the mashups you make, including following copyright law and the rules of any platform you post to.</li>
-    <li>Don't use Hookd to break the law or to infringe anyone's rights.</li>
+    <li>You're responsible for the files you add and for what you do with the mashups and videos you make, including following copyright law, other people's privacy and the rules of any platform you post to.</li>
+    <li>Don't use Hookd to break the law or to infringe anyone's rights, for example to mislead people about what someone said or to harass anyone.</li>
+    <li><strong>Automatic features can be wrong.</strong> Captions, detected tempos and keys, found hooks and separated vocals are made by software and can contain mistakes. Check them before you publish anything.</li>
     <li>To the extent the law allows, the maker of Hookd isn't liable for any loss or damage from using it, including lost files. Keep your own copies of anything important.</li>
     <li>These terms may be updated. The date at the top shows the latest version, and continuing to use Hookd means you accept it.</li>
   </ul>
 
-  <h2 id="copyright">Copyright &amp; your music</h2>
+  <h2 id="copyright">Copyright &amp; your content</h2>
   <ul>
-    <li><strong>Hookd doesn't host, provide, sell or distribute any music.</strong> It's a tool, like an audio editor. Every song comes from the person using it, stays on their device, and is never sent to us.</li>
+    <li><strong>Hookd doesn't host, provide, sell or distribute any music or video.</strong> It's a tool, like an audio or video editor. Every file comes from the person using it, stays on their device, and is never sent to us.</li>
     <li><strong>A mashup is still built from other people's work.</strong> Songs are usually protected by copyright, so only use music you own or have permission to use. Making a mashup for yourself and posting one publicly are different things. Publishing may need permission from the rights holders.</li>
-    <li><strong>Posting on social media:</strong> platforms such as Instagram and YouTube have their own music licensing and copyright systems. They may mute, block or label content that uses copyrighted music. That's between you and the platform.</li>
-    <li><strong>Copyright complaints:</strong> because no music is stored or shared through Hookd, there's no uploaded content for us to remove. If you believe something that is part of this website (its code, text or images) infringes your rights, please get in touch using the contact details below.</li>
+    <li><strong>Separated vocals and beats are still the original song.</strong> An acapella or instrumental made with Vocals only / Beat only belongs to the same rights holders as the song it came from, so the same rules apply to sharing it.</li>
+    <li><strong>Videos:</strong> only edit and post videos you made or have the right to use. If other people appear or speak in a video, make sure they're happy for it to be shared. The same goes for music you add under a video and for pictures you use on a cover.</li>
+    <li><strong>Names of songs and artists</strong> appear on Hookd only to describe the songs people bring, such as a ready-made set of cut points for a few well-known songs. Hookd isn't affiliated with, sponsored or endorsed by any artist, film, label or platform.</li>
+    <li><strong>Posting on social media:</strong> platforms such as Instagram, YouTube and LinkedIn have their own music licensing and copyright systems. They may mute, block or label content that uses copyrighted music. That's between you and the platform.</li>
+    <li><strong>No watermark:</strong> Hookd never adds a watermark, logo or credit to what you make, and claims no rights in it.</li>
+    <li><strong>Copyright complaints:</strong> because no music or video is stored or shared through Hookd, there's no uploaded content for us to remove. If you believe something that is part of this website (its code, text or images) infringes your rights, please get in touch using the contact details below.</li>
   </ul>
 
   <h2 id="credits">Open source</h2>
@@ -81,7 +88,7 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line);
     <li><a href="https://github.com/Vanilagy/mp4-muxer">mp4-muxer</a> and <a href="https://github.com/Vanilagy/webm-muxer">webm-muxer</a> for video files (MIT)</li>
     <li><a href="https://github.com/huggingface/transformers.js">Transformers.js</a> and <a href="https://github.com/microsoft/onnxruntime">ONNX Runtime</a> for automatic captions (Apache 2.0 and MIT), running OpenAI's <a href="https://github.com/openai/whisper">Whisper</a> speech model (MIT)</li>
     <li>Meta's <a href="https://github.com/facebookresearch/demucs">Demucs</a> (HTDemucs v4) for Vocals only and Beat only (MIT), in the <a href="https://huggingface.co/webnn/stem-separator">ONNX export by the WebNN team</a> (MIT), running on ONNX Runtime (MIT)</li>
-    <li><a href="https://github.com/Signalsmith-Audio/signalsmith-stretch">Signalsmith Stretch</a> for key matching (MIT)</li>
+    <li><a href="https://github.com/Signalsmith-Audio/signalsmith-stretch">Signalsmith Stretch</a> for key matching (MIT, copyright Geraint Luff / Signalsmith Audio Ltd., included unmodified with its license)</li>
     <li>Yatra One, Bricolage Grotesque, Hind, Figtree, JetBrains Mono, Lato, Poppins and Playfair Display from Google Fonts (SIL Open Font License)</li>
   </ul>
 

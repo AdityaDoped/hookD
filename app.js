@@ -660,8 +660,9 @@ function allValid() {
 /* ---------- Pitch shifting (for key matching) ----------
    Signalsmith Stretch (MIT) changes pitch without changing speed. The cut (plus a
    little either side) is shifted once into its own buffer, which the mix then plays
-   exactly like the original. Loaded only when key matching is used. */
-const STRETCH_URL = "https://cdn.jsdelivr.net/npm/signalsmith-stretch@1.3.2/SignalsmithStretch.mjs";
+   exactly like the original. Loaded only when key matching is used, from this site's
+   own copy (vendor/), since it runs inside the audio engine. */
+const STRETCH_URL = "/vendor/signalsmith-stretch-1.3.2/SignalsmithStretch.mjs";
 let stretchLib = null;
 function loadStretch() {
   if (!stretchLib) stretchLib = import(STRETCH_URL).then(m => { m.default.moduleUrl = STRETCH_URL; return m.default; })
@@ -1178,7 +1179,10 @@ function updateCard(tr) {
   const si = $(`#start-${tr.id}`), ei = $(`#end-${tr.id}`);
   if (document.activeElement !== si) { si.value = fmt(tr.start); si.classList.remove("invalid"); }
   if (document.activeElement !== ei) { ei.value = fmt(tr.end); ei.classList.remove("invalid"); }
-  $(".cutlen", li).innerHTML = `<span class="mono">${fmt(tr.end - tr.start)}</span> cut` + (tr.recipe ? `<span class="recipe">&middot; ${tr.recipe}</span>` : "");
+  const len = document.createElement("span"), cl = $(".cutlen", li);
+  len.className = "mono"; len.textContent = fmt(tr.end - tr.start);
+  cl.replaceChildren(len, " cut");
+  if (tr.recipe) { const r = document.createElement("span"); r.className = "recipe"; r.textContent = "· " + tr.recipe; cl.append(r); }
   $('[data-act="up"]', li).disabled = i === 0;
   $('[data-act="down"]', li).disabled = i === state.tracks.length - 1;
   const prob = problems(tr, i, P), w = $(".warn", li);

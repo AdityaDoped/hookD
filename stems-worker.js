@@ -12,7 +12,10 @@
         | { type: "done", vocals: [L, R], beat: [L, R], device } | { type: "error", message } */
 
 const ORT = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/";
-const MODEL = "https://huggingface.co/webnn/stem-separator/resolve/main/onnx/htdemucs_fwd.onnx";
+// pinned to the exact version checked against the official Demucs, so a change on
+// Hugging Face can never swap in a different model
+const MODEL = "https://huggingface.co/webnn/stem-separator/resolve/b56f9e66ceffca2401f83d2469dadaddd06e4994/onnx/htdemucs_fwd.onnx";
+const CACHE = "hookd-models-v2";
 const SR = 44100, SEG = 343980, NFFT = 4096, HL = 1024, BINS = 2048, LE = 336, PAD = 1536;
 const SOURCES = 4, VOCALS = 3;   // drums, bass, other, vocals
 
@@ -118,7 +121,8 @@ async function separate(session, ort, L, R) {
 
 /* ---------- Model, downloaded once and kept ---------- */
 async function fetchCached(url, onProgress) {
-  const cache = await caches.open("hookd-models-v1").catch(() => null);
+  caches.delete("hookd-models-v1").catch(() => {});   // the unpinned copy from before
+  const cache = await caches.open(CACHE).catch(() => null);
   const hit = cache && await cache.match(url);
   if (hit) return new Uint8Array(await hit.arrayBuffer());
   const r = await fetch(url);
