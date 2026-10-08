@@ -36,7 +36,7 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line);
 <main>
   <a class="home" href="/">Hook<span>d</span></a>
   <h1>Privacy, terms &amp; copyright</h1>
-  <p class="updated">Last updated 6 October 2026</p>
+  <p class="updated">Last updated 8 October 2026</p>
 
   <nav class="toc" aria-label="On this page">
     <a href="#privacy">Privacy</a>
@@ -53,6 +53,8 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line);
     <li><strong>What's saved on your device:</strong> so a refresh doesn't lose your work, Hookd keeps your songs and settings in your browser's local storage (IndexedDB). Only this browser on this device can read them. Tap <em>Start over</em> or clear this site's data in your browser settings to delete them.</li>
     <li><strong>What other services see:</strong> to load the page, your browser connects to the host (Vercel), to Google Fonts for the typefaces, and to jsDelivr and cdnjs (Cloudflare) for open-source code libraries. Like any website request, these services receive your IP address and basic browser details, and they may keep short-term logs under their own privacy policies. None of them receive your songs.</li>
     <li><strong>Automatic captions:</strong> only if you use them, your browser downloads a speech-recognition model (Whisper) from Hugging Face once and keeps it. The listening happens on your device; your video's sound is never sent to Hugging Face or anyone else.</li>
+    <li><strong>Vocals only / Beat only:</strong> only if you use them, your browser downloads a vocal-separation model (Demucs, about 170 MB) from Hugging Face once and keeps it. The separating happens on your device; your songs are never sent anywhere.</li>
+    <li><strong>Match keys:</strong> only if you turn it on, your browser downloads a small pitch-shifting library from jsDelivr. Your songs stay on your device.</li>
     <li><strong>What we collect:</strong> nothing. Hookd doesn't run a server or a database, so there's nothing about you for us to store, sell or share.</li>
   </ul>
 
@@ -79,7 +81,9 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line);
     <li><a href="https://github.com/zhuker/lamejs">lamejs</a> for MP3 encoding (LGPL, loaded unmodified)</li>
     <li><a href="https://github.com/Vanilagy/mp4-muxer">mp4-muxer</a> and <a href="https://github.com/Vanilagy/webm-muxer">webm-muxer</a> for video files (MIT)</li>
     <li><a href="https://github.com/huggingface/transformers.js">Transformers.js</a> and <a href="https://github.com/microsoft/onnxruntime">ONNX Runtime</a> for automatic captions (Apache 2.0 and MIT), running OpenAI's <a href="https://github.com/openai/whisper">Whisper</a> speech model (MIT)</li>
-    <li>Yatra One, Figtree and JetBrains Mono from Google Fonts (SIL Open Font License)</li>
+    <li>Meta's <a href="https://github.com/facebookresearch/demucs">Demucs</a> (HTDemucs v4) for Vocals only and Beat only (MIT), in the <a href="https://huggingface.co/webnn/stem-separator">ONNX export by the WebNN team</a> (MIT), running on ONNX Runtime (MIT)</li>
+    <li><a href="https://github.com/Signalsmith-Audio/signalsmith-stretch">Signalsmith Stretch</a> for key matching (MIT)</li>
+    <li>Yatra One, Figtree, JetBrains Mono, Lato, Poppins and Playfair Display from Google Fonts (SIL Open Font License)</li>
   </ul>
 
   <h2 id="contact">Contact</h2>

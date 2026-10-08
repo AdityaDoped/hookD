@@ -145,6 +145,9 @@ button, input, select { font: inherit; color: inherit; }
 .cut input { width: 84px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font-family: var(--mono); font-size: 14px; }
 .cut input.invalid { border-color: var(--err); }
 .cutlen { color: var(--muted); font-size: 13px; }
+.cut .part select { font-size: 13px; padding: 5px 8px; }
+.partst { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+.partst.err { color: var(--err); }
 .cut .spacer { flex: 1; }
 .warn { margin: 10px 0 0; color: var(--err); font-size: 13px; }
 .recipe { display: inline-block; margin-left: 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--c); }
@@ -319,6 +322,8 @@ kbd { font: 600 12px var(--mono); border: 1px solid var(--line); border-bottom-w
 .btn.quiet:hover { color: var(--ink); background: var(--sunk); }
 .order li.join { grid-template-columns: 12px auto 1fr; gap: 10px; }
 .order .jn { font-size: 12px; color: var(--muted); }
+.order .jns { display: grid; gap: 1px; }
+.tmeta .kv { font-size: 12px; font-weight: 600; }
 .order .jn.ok { color: var(--ok); }
 .vid { display: grid; gap: 8px; }
 .vid .row { flex-wrap: wrap; }
@@ -364,7 +369,8 @@ kbd { font: 600 12px var(--mono); border: 1px solid var(--line); border-bottom-w
   .cut { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .cut label { display: grid; gap: 4px; }
   .cut input { width: 100%; }
-  .cut .cutlen { grid-column: 1 / -1; }
+  .cut .cutlen, .cut .part { grid-column: 1 / -1; }
+  .cut .part select { width: 100%; }
   .cut .spacer { display: none; }
   .cut .btn { width: 100%; }
   .live-top .go { margin-left: 0; }
@@ -460,6 +466,7 @@ img { max-width: 100%; }
       <label class="check"><input type="checkbox" id="level" checked><span>Even out loudness<small>Quiet and loud songs end up at the same volume.</small></span></label>
       <label class="check"><input type="checkbox" id="snap" checked><span>Snap cuts to the beat<small>Cut points land on the nearest beat, so transitions stay in rhythm.</small></span></label>
       <label class="check"><input type="checkbox" id="sync" checked><span>Match tempos in transitions<small>The next song speeds up or slows down to lock onto the beat, then eases back.</small></span></label>
+      <label class="check"><input type="checkbox" id="keys"><span>Match keys in transitions<small>Tunes the next song up or down a little, without changing its speed, so the two songs sound in tune together.</small></span></label>
 
       <div>
         <div class="timeline" id="timeline" title="Click to play from here"><div class="tl-empty" id="tlEmpty">Your timeline will appear here</div><div class="head" id="tlHead" hidden></div></div>
@@ -476,8 +483,12 @@ img { max-width: 100%; }
         <label class="label" for="mixName">File name</label>
         <div class="row">
           <input id="mixName" value="my-mashup" spellcheck="false">
-          <button type="button" class="btn" id="dlBtn" disabled>Download audio</button>
+          <select id="mixFmt" aria-label="Audio format">
+            <option value="mp3">MP3 320</option>
+            <option value="wav">WAV (lossless)</option>
+          </select>
         </div>
+        <button type="button" class="btn" id="dlBtn" disabled>Download audio</button>
         <div class="vid">
           <span class="label">Video for Reels and Status</span>
           <div class="row">
@@ -496,7 +507,7 @@ img { max-width: 100%; }
         </div>
         <div class="vid-preview" id="vidPreview" hidden><canvas id="vidCanvas" width="720" height="1280"></canvas></div>
         <progress id="dlProg" max="1" value="0" hidden></progress>
-        <small id="dlNote">Audio saves as .webm and video as .mp4 with an animated visualizer.</small>
+        <small id="dlNote">MP3 at 320 kbps, the highest MP3 quality. Video saves as MP4 with an animated visualizer.</small>
       </div>
     </aside>
   </div>

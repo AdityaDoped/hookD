@@ -15,9 +15,18 @@
 
 Switch with the buttons at the top: **Build a mashup**, **Live DJ**, **Edit a video**. The video editor is the one most people need help with.
 
-1. **Build a mashup**: drop in songs, drag across each waveform to pick the best part (or press *Find the hook*), choose transitions in *Your mix*, then *Download audio* or *Download video*. *Auto mashup* picks the hooks, the order and the transitions.
+1. **Build a mashup**: drop in songs, drag across each waveform to pick the best part (or press *Find the hook*), choose transitions in *Your mix*, then *Download audio* or *Download video*. *Auto mashup* picks the hooks, the order and the transitions. See "Mashups: the details" below.
 2. **Live DJ**: each song becomes a pad; tap pads (or press 1 to 9) to switch songs on the beat.
 3. **Edit a video**: cut and join MP4/MOV videos, add captions, chapters, a title, a banner, music and transitions, then export an MP4.
+
+## Mashups: the details
+
+- **Each song card** shows its length, detected tempo (BPM, with ½ and ×2 buttons if it's off) and, when key matching is on, its detected key (like "Key Ebm", or "Key unclear"). *From* and *To* set the cut; *Play cut* previews it.
+- **Use** (on each card): *Whole song*, *Vocals only* or *Beat only (no vocals)*. The vocal and beat parts are separated on the device by Meta's Demucs model (the first use downloads about 170 MB once, then it's kept). Only the cut, plus a few seconds either side, is separated. It takes roughly as long as the cut on a computer with graphics acceleration (WebGPU), and several times longer without; progress shows under the card. Mixing an acapella of one song with the beat of another works by putting them next to each other with a crossfade, since songs play one after another.
+- **Your mix** settings: *Transitions* (Crossfade, Filter sweep, Echo out, Riser, Hard cut, also chosen per join in the order list), *Transition length*, *Fade out at the end*, *Even out loudness*, *Snap cuts to the beat*, *Match tempos in transitions* (the next song speeds up or slows down to lock beats, then eases back) and *Match keys in transitions* (off by default: the next song is pitched up or down, by at most 3 semitones and without changing its speed, into a key that fits the song before it; the order list says what it did, or that keys were unclear or too far apart).
+- **Vibe** (top bar): Original, Slowed + reverb, Sped up.
+- **Download**: the format menu beside the file name chooses *MP3 320* (default) or *WAV (lossless)*, 24-bit, about 15 MB a minute. *Download video* makes an MP4 with an animated visualizer for Reels and Status (vertical or square, whole mashup or the first 30/60/90 s). Nothing is ever watermarked.
+- **Live DJ** turns each cut into a pad; tapping a pad switches to it with the chosen transition, on the beat. It uses each song's *Use* setting once that part is separated. Key matching applies to built mashups, not live play.
 
 ## Video editor: the main ideas
 

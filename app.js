@@ -26,7 +26,7 @@ const RECIPES = [{
 
 /* ---------- State ---------- */
 const state = {
-  tracks: [], xf: 3, fadeOut: 3, level: true, snap: true, sync: true, vibe: "original",
+  tracks: [], xf: 3, fadeOut: 3, level: true, snap: true, sync: true, keys: false, vibe: "original",
   defStyle: "crossfade", mode: "build",
   liveStyle: "filter", liveLen: 2, quant: true, auto: true,
 };
@@ -126,15 +126,15 @@ function persist() {
   clearTimeout(saveT);
   saveT = setTimeout(() => { if (!restoring) store.putSession(sessionData()).catch(storageFail); }, 400);
 }
-const SAVED_SETTINGS = ["xf", "fadeOut", "level", "snap", "sync", "vibe", "defStyle", "liveStyle", "liveLen", "quant", "auto"];
+const SAVED_SETTINGS = ["xf", "fadeOut", "level", "snap", "sync", "keys", "vibe", "defStyle", "liveStyle", "liveLen", "quant", "auto"];
 function sessionData() {
   const settings = {};
   SAVED_SETTINGS.forEach(k => (settings[k] = state[k]));
-  Object.assign(settings, { mixName: $("#mixName").value, vidShape: $("#vidShape").value, vidLen: $("#vidLen").value });
+  Object.assign(settings, { mixName: $("#mixName").value, mixFmt: $("#mixFmt").value, vidShape: $("#vidShape").value, vidLen: $("#vidLen").value });
   return {
     v: 1, nextId, settings,
     tracks: state.tracks.map(t => ({ id: t.id, name: t.name, fileName: t.fileName, start: t.start, end: t.end,
-      trans: t.trans, recipe: t.recipe, order: t.order, color: t.color, beat: t.beat })),
+      trans: t.trans, recipe: t.recipe, order: t.order, color: t.color, beat: t.beat, part: t.part || null })),
   };
 }
 function applySettings(s) {
@@ -142,12 +142,13 @@ function applySettings(s) {
   SAVED_SETTINGS.forEach(k => { if (k in s) state[k] = s[k]; });
   $("#xf").value = state.xf; $("#xfOut").textContent = state.xf.toFixed(1) + " s";
   $("#fo").value = state.fadeOut; $("#foOut").textContent = state.fadeOut.toFixed(1) + " s";
-  $("#defStyle").value = state.defStyle; $("#level").checked = state.level; $("#snap").checked = state.snap;
+  $("#defStyle").value = state.defStyle; $("#level").checked = state.level; $("#snap").checked = state.snap; $("#keys").checked = state.keys;
   $("#liveStyle").value = state.liveStyle; $("#liveLen").value = state.liveLen; $("#liveLenOut").textContent = state.liveLen.toFixed(1) + " s";
   $("#quant").checked = state.quant; $("#auto").checked = state.auto;
   setSync(state.sync);
   showVibe();
   if (s.mixName) $("#mixName").value = s.mixName;
+  if ((s.mixFmt === "mp3" || s.mixFmt === "wav") && !$(`#mixFmt [value="${s.mixFmt}"]`).disabled) { $("#mixFmt").value = s.mixFmt; showAudioFormat(); }
   if (s.vidShape) $("#vidShape").value = s.vidShape;
   if (s.vidLen) $("#vidLen").value = s.vidLen;
 }
@@ -280,6 +281,88 @@ function findHook(tr, target = 48) {
   return best || { start: 0, end: Math.min(dur, W), loud: mean(0, dur) };
 }
 
+/* ---------- Musical key ---------- */
+const NOTES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+// Krumhansl-Kessler: how strongly each scale degree belongs to a major or a minor key
+const KK_MAJ = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+const KK_MIN = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+const keyName = k => NOTES[((k.root % 12) + 12) % 12] + (k.minor ? "m" : "");
+const wrap12 = d => ((d % 12) + 18) % 12 - 6;   // into [-6, 6)
+// The key of the cut: how much of each of the 12 notes it holds (a chroma profile),
+// matched against the major and minor key profiles. Cached until the cut moves.
+function detectKey(tr) {
+  const id = tr.start.toFixed(1) + "-" + tr.end.toFixed(1);
+  if (tr.keyId === id) return tr.key;
+  const buf = tr.buffer, sr = buf.sampleRate, D = 4, fs = sr / D, N = 4096;
+  const a = buf.getChannelData(0), b = buf.numberOfChannels > 1 ? buf.getChannelData(1) : a;
+  const s0 = Math.floor(tr.start * sr), s1 = Math.min(buf.length, Math.floor(tr.end * sr));
+  const re = new Float64Array(N), im = new Float64Array(N), mag = new Float64Array(N / 2), chroma = new Float64Array(12);
+  const hann = new Float64Array(N).map((_, i) => 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1)));
+  const k0 = Math.ceil(60 * N / fs), k1 = Math.floor(1500 * N / fs);
+  // 1. the notes actually sounding: spectral peaks (drums are broadband, so they make few clear peaks)
+  const frames = [], step = Math.max(N * D, Math.floor((s1 - s0 - N * D) / 60));   // at most ~60 looks, so dragging a cut stays smooth
+  for (let p = s0; p + N * D < s1; p += step) {
+    for (let i = 0; i < N; i++) { const j = p + i * D; re[i] = (a[j] + b[j] + a[j + 1] + b[j + 1] + a[j + 2] + b[j + 2] + a[j + 3] + b[j + 3]) * hann[i]; im[i] = 0; }
+    fftMag(re, im);
+    let top = 0;
+    for (let k = k0 - 1; k <= k1 + 1; k++) { mag[k] = Math.hypot(re[k], im[k]); if (mag[k] > top) top = mag[k]; }
+    const peaks = [];
+    for (let k = k0; k <= k1; k++) {
+      const m = mag[k];
+      if (m < top * 0.05 || m <= mag[k - 1] || m < mag[k + 1]) continue;
+      const den = mag[k - 1] - 2 * m + mag[k + 1], d = den ? 0.5 * (mag[k - 1] - mag[k + 1]) / den : 0;   // between bins
+      const midi = 69 + 12 * Math.log2((k + d) * fs / N / 440);
+      // low notes carry the harmony; high ones are often overtones of them (a note's
+      // third harmonic sounds a fifth above it, which pulls keys towards the dominant)
+      peaks.push([midi, Math.sqrt(m) * (midi < 60 ? 1 : Math.pow(0.5, (midi - 60) / 12))]);
+    }
+    frames.push(peaks);
+  }
+  // 2. the song's tuning: recordings aren't always at A = 440 Hz
+  let cx = 0, cy = 0;
+  for (const f of frames) for (const [midi, w] of f) { const ang = 2 * Math.PI * (midi - Math.round(midi)); cx += w * Math.cos(ang); cy += w * Math.sin(ang); }
+  const tune = Math.atan2(cy, cx) / (2 * Math.PI);
+  // 3. how much of each of the 12 notes, every moment counting equally
+  const frame = new Float64Array(12);
+  for (const f of frames) {
+    frame.fill(0); let sum = 0;
+    for (const [midi, w] of f) { frame[((Math.round(midi - tune) % 12) + 12) % 12] += w; sum += w; }
+    if (sum > 0) for (let i = 0; i < 12; i++) chroma[i] += frame[i] / sum;
+  }
+  const corr = (prof, root) => {
+    let mx = 0, my = 0;
+    for (let i = 0; i < 12; i++) { mx += chroma[(i + root) % 12]; my += prof[i]; }
+    mx /= 12; my /= 12;
+    let sxy = 0, sxx = 0, syy = 0;
+    for (let i = 0; i < 12; i++) { const x = chroma[(i + root) % 12] - mx, y = prof[i] - my; sxy += x * y; sxx += x * x; syy += y * y; }
+    return sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
+  };
+  let best = { root: 0, minor: false, score: -2 };
+  for (let r = 0; r < 12; r++) for (const minor of [false, true]) {
+    const s = corr(minor ? KK_MIN : KK_MAJ, r);
+    if (s > best.score) best = { root: r, minor, score: s, tune };
+  }
+  tr.key = best; tr.keyId = id;
+  return best;
+}
+const KEY_SURE = 0.5;   // below this the cut has no clear key, so it's left as it is
+const MAX_SHIFT = 3;    // semitones; bigger shifts make voices sound unnatural
+// Semitones to shift the incoming song so it's in tune with the outgoing one. outRoot is
+// where the outgoing song sits now (after its own shift); during the overlap the
+// incoming song is already sped up by the tempo sync ratio r, which raises its pitch too.
+function keyShift(outKey, outRoot, inKey, r) {
+  if (outKey.score < KEY_SURE || inKey.score < KEY_SURE) return null;
+  const varispeed = r ? 12 * Math.log2(r) : 0;
+  // compatible keys: the same key, its relative major/minor, and the keys a fifth either side
+  const base = outKey.minor === inKey.minor ? outRoot : outRoot + (inKey.minor ? 9 : 3);
+  let best = null;
+  for (const [t, cost] of [[base, 0], [base + 7, 0.4], [base + 5, 0.4]]) {
+    const d = wrap12(t - inKey.root - inKey.tune - varispeed), score = Math.abs(d) + cost;
+    if (!best || score < best.score) best = { d, score };
+  }
+  return Math.abs(best.d) <= MAX_SHIFT ? best.d : null;
+}
+
 function snapTime(tr, t) {
   if (!state.snap || !tr.beat) return t;
   const { period, phase } = tr.beat;
@@ -288,11 +371,12 @@ function snapTime(tr, t) {
 
 function levelGain(tr) {
   if (!state.level) return 1;
-  const key = tr.start.toFixed(2) + "-" + tr.end.toFixed(2);
+  // measured on the part that plays (vocals alone are quieter than the whole song)
+  const pb = partBuffer(tr), buf = pb.buffer, sr = buf.sampleRate;
+  const key = tr.start.toFixed(2) + "-" + tr.end.toFixed(2) + (buf === tr.buffer ? "" : tr.part);
   if (tr.gainKey === key) return tr.gain;
-  const buf = tr.buffer, sr = buf.sampleRate;
   const a = buf.getChannelData(0), b = buf.numberOfChannels > 1 ? buf.getChannelData(1) : a;
-  const s = Math.floor(tr.start * sr), e = Math.min(buf.length, Math.floor(tr.end * sr));
+  const s = Math.max(0, Math.floor((tr.start - pb.t0) * sr)), e = Math.min(buf.length, Math.floor((tr.end - pb.t0) * sr));
   let sum = 0, c = 0;
   for (let i = s; i < e; i += 6) { sum += a[i] * a[i] + b[i] * b[i]; c += 2; }
   const rms = Math.sqrt(sum / Math.max(1, c));
@@ -400,8 +484,8 @@ function makeMaster(c, wet, alwaysReverb) {
 }
 function beatSec(tr) { return tr.beat ? tr.beat.period : 0.5; }
 
-function makeVoice(c, tr, dest, rate) {
-  const src = c.createBufferSource(); src.buffer = tr.buffer; src.playbackRate.value = rate;
+function makeVoice(c, tr, dest, rate, buffer = tr.buffer) {
+  const src = c.createBufferSource(); src.buffer = buffer; src.playbackRate.value = rate;
   const lvl = c.createGain(); lvl.gain.value = levelGain(tr);
   const hp = c.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 10;
   const lp = c.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = Math.min(20000, c.sampleRate / 2 - 100);
@@ -538,7 +622,16 @@ function plan() {
     }
     const style = i < n - 1 ? styleOf(tr) : null;
     const j = style ? junction(tr, state.tracks[i + 1], style, rate) : null;
-    segs.push({ tr, at: t, len, style, ov: j ? j.ov : 0, L: j ? j.L : state.xf, j, ramp, prevJ });
+    // key matching: each song is shifted to sit in tune with the one before it
+    let shift = 0, keyNote = null;
+    const prev = segs[i - 1];
+    if (state.keys && prev) {
+      const ok = detectKey(prev.tr), ik = detectKey(tr);
+      const d = keyShift(ok, ok.root + ok.tune + prev.shift, ik, prevJ && prevJ.r);
+      if (d == null) keyNote = ok.score < KEY_SURE || ik.score < KEY_SURE ? "unclear" : "far";
+      else shift = Math.abs(d) < 0.05 ? 0 : d;
+    }
+    segs.push({ tr, at: t, len, style, ov: j ? j.ov : 0, L: j ? j.L : state.xf, j, ramp, prevJ, shift, keyNote });
     t += len - (j ? j.ov : 0);
     prevJ = j;
   });
@@ -556,30 +649,128 @@ function problems(tr, i, P) {
   return "";
 }
 function mixKey() {
-  return JSON.stringify([state.xf, state.fadeOut, state.level, state.vibe, state.defStyle, state.sync,
-    state.tracks.map(t => [t.id, t.start, t.end, t.trans || "", t.beat.period])]);
+  return JSON.stringify([state.xf, state.fadeOut, state.level, state.vibe, state.defStyle, state.sync, state.keys,
+    state.tracks.map(t => [t.id, t.start, t.end, t.trans || "", t.beat.period, t.part || ""])]);
 }
 function allValid() {
   const P = plan();
   return state.tracks.length > 0 && state.tracks.every((t, i) => !problems(t, i, P));
 }
 
+/* ---------- Pitch shifting (for key matching) ----------
+   Signalsmith Stretch (MIT) changes pitch without changing speed. The cut (plus a
+   little either side) is shifted once into its own buffer, which the mix then plays
+   exactly like the original. Loaded only when key matching is used. */
+const STRETCH_URL = "https://cdn.jsdelivr.net/npm/signalsmith-stretch@1.3.2/SignalsmithStretch.mjs";
+let stretchLib = null;
+function loadStretch() {
+  if (!stretchLib) stretchLib = import(STRETCH_URL).then(m => { m.default.moduleUrl = STRETCH_URL; return m.default; })
+    .catch(e => { stretchLib = null; throw e; });
+  return stretchLib;
+}
+async function shiftedCut(tr, semis) {
+  const pb = partBuffer(tr), src = pb.buffer, sr = src.sampleRate;
+  const t0 = Math.max(pb.t0, tr.start - 0.5), t1 = Math.min(pb.t0 + src.duration, tr.end + 1);
+  const id = `${src === tr.buffer ? "full" : tr.part}-${t0.toFixed(3)}-${t1.toFixed(3)}-${semis.toFixed(3)}`;
+  if (tr.shifted && tr.shifted.id === id) return tr.shifted;
+  const SS = await loadStretch();
+  const a = Math.floor((t0 - pb.t0) * sr), b = Math.floor((t1 - pb.t0) * sr);
+  const chans = [0, 1].map(ch => src.getChannelData(Math.min(ch, src.numberOfChannels - 1)).slice(a, b));
+  const c = new OfflineAudioContext(2, b - a, sr), node = await SS(c);
+  node.connect(c.destination);
+  await node.addBuffers(chans);
+  node.schedule({ output: 0, input: 0, rate: 1, semitones: semis, active: true });
+  tr.shifted = { id, buffer: await c.startRendering(), t0 };
+  return tr.shifted;
+}
+
+/* ---------- Vocals only / beat only ----------
+   stems-worker.js separates a cut (plus a little either side, for transitions) into
+   the voice and everything else, on this device. The parts are kept in memory as
+   44.1 kHz AudioBuffers; playback resamples them as needed. */
+const PARTS = { full: "Whole song", vocals: "Vocals only", beat: "Beat only (no vocals)" };
+const STEM_SR = 44100;
+let stemWorker = null, stemQueue = Promise.resolve(), stemNoticeShown = false;
+// The buffer a song plays from, and the song time where that buffer starts.
+function partBuffer(tr) {
+  const part = tr.part || "full", s = tr.stems;
+  if (part !== "full" && s && s.t0 <= Math.max(0, tr.start - 0.5) + 1e-6 && s.t1 >= Math.min(tr.duration, tr.end + 1) - 1e-6)
+    return { buffer: s[part], t0: s.t0 };
+  return { buffer: tr.buffer, t0: 0 };
+}
+const needsStems = tr => (tr.part || "full") !== "full" && partBuffer(tr).buffer === tr.buffer;
+function stemStatus(tr, msg, err) {
+  if (!tr.el) return;
+  const p = $(".partst", tr.el);
+  p.textContent = msg || ""; p.hidden = !msg; p.classList.toggle("err", !!err);
+}
+function separateTrack(tr) {
+  if (tr.stemJob) return tr.stemJob;
+  const t0 = Math.max(0, tr.start - 2), t1 = Math.min(tr.duration, tr.end + 4);
+  stemStatus(tr, "Waiting to separate…");
+  const job = stemQueue.catch(() => {}).then(async () => {
+    // the model works at 44.1 kHz
+    const off = new OfflineAudioContext(2, Math.ceil((t1 - t0) * STEM_SR), STEM_SR), src = off.createBufferSource();
+    src.buffer = tr.buffer; src.connect(off.destination); src.start(0, t0, t1 - t0);
+    const mixed = await off.startRendering();
+    if (!stemWorker) stemWorker = new Worker("stems-worker.js", { type: "module" });
+    const res = await new Promise((resolve, reject) => {
+      stemWorker.onmessage = e => {
+        const d = e.data;
+        if (d.type === "download") stemStatus(tr, `Downloading the vocal separator (once): ${Math.round(d.loaded / 1e6)} of ${Math.round((d.total || 168e6) / 1e6)} MB`);
+        else if (d.type === "progress") stemStatus(tr, `Separating vocals… ${Math.round(d.p * 100)}%${d.device === "wasm" ? " (no graphics acceleration here, so this is slower)" : ""}`);
+        else if (d.type === "done") resolve(d);
+        else if (d.type === "error") reject(new Error(d.message));
+      };
+      stemWorker.onerror = () => { stemWorker = null; reject(new Error("the separator stopped unexpectedly")); };
+      const l = mixed.getChannelData(0).slice(), r = mixed.getChannelData(1).slice();
+      stemStatus(tr, "Starting the vocal separator…");
+      stemWorker.postMessage({ type: "run", left: l, right: r }, [l.buffer, r.buffer]);
+    });
+    const toBuffer = ch => { const b = new AudioBuffer({ length: ch[0].length, numberOfChannels: 2, sampleRate: STEM_SR }); b.copyToChannel(ch[0], 0); b.copyToChannel(ch[1], 1); return b; };
+    tr.stems = { t0, t1, vocals: toBuffer(res.vocals), beat: toBuffer(res.beat) };
+    stemStatus(tr, "");
+  });
+  tr.stemJob = stemQueue = job;
+  job.catch(e => { tr.part = "full"; stemStatus(tr, `Couldn't separate the vocals: ${e.message}. Using the whole song.`, true); })
+    .finally(() => { tr.stemJob = null; if (tr.el) $(`#part-${tr.id}`).value = tr.part || "full"; refreshMixPanel(); });
+  return job;
+}
+function setPart(tr, part) {
+  tr.part = part === "full" ? null : part;
+  stopAll();
+  if (tr.part && needsStems(tr)) {
+    if (!stemNoticeShown) { stemNoticeShown = true; toast("The first time, Hookd downloads a 170 MB vocal separator. It stays in this browser, and your songs never leave your device."); }
+    separateTrack(tr).catch(() => {});
+  }
+  refreshMixPanel();
+}
+
 async function renderMix() {
   const key = mixKey();
   if (mix.buffer && mix.key === key) return mix.buffer;
+  // songs set to vocals or beat only are separated first
+  for (const t of state.tracks) if (needsStems(t)) await separateTrack(t).catch(() => {});   // on failure it falls back to the whole song
   const P = plan(), sr = 48000, vibe = VIBES[state.vibe];
+  // shifted copies of the songs that key matching moves
+  const shifted = new Map();
+  for (const s of P.segs) {
+    if (!s.shift) continue;
+    try { shifted.set(s, await shiftedCut(s.tr, s.shift)); }
+    catch (e) { shifted.clear(); toast("Couldn't load the pitch shifter, so keys aren't matched this time. Check your connection."); break; }
+  }
   const c = new OfflineAudioContext(2, Math.ceil((P.total + 0.3) * sr), sr);
   const M = makeMaster(c, 0, false);   // reverb is added after rendering (see freeverbInPlace)
   M.out.connect(c.destination);
   P.segs.forEach((s, i) => {
-    const v = makeVoice(c, s.tr, M.input, P.rate);
+    const pb = shifted.get(s) || partBuffer(s.tr), v = makeVoice(c, s.tr, M.input, P.rate, pb.buffer);
     if (s.ramp) {
       const { r, L, R } = s.ramp, pr = v.src.playbackRate;
       pr.setValueAtTime(P.rate * r, s.at);
       pr.setValueAtTime(P.rate * r, s.at + L);
       if (R > 0) pr.linearRampToValueAtTime(P.rate, s.at + L + R);
     }
-    v.src.start(s.at, s.tr.start);
+    v.src.start(s.at, s.tr.start - pb.t0);
     const prev = P.segs[i - 1];
     if (prev) applyIn(c, v, prev.style, s.at, prev.L, false);
     if (s.style) {
@@ -836,6 +1027,7 @@ function buildCard(tr) {
       <input class="tname" id="name-${tr.id}" aria-label="Song name" spellcheck="false">
       <span class="tmeta"><span class="mono dur"></span>
         <span class="bpm" title="Detected tempo. If it looks off, halve or double it."><span class="bv"></span><button type="button" data-bpm="0.5" aria-label="Halve tempo">&frac12;</button><button type="button" data-bpm="2" aria-label="Double tempo">&times;2</button></span>
+        <span class="kv mono" title="Detected key of this cut"></span>
       </span>
       <span class="actions">
         <button type="button" class="icon-btn" data-act="up" aria-label="Move up">${ICON.up}</button>
@@ -848,14 +1040,19 @@ function buildCard(tr) {
       <label for="start-${tr.id}">From <input id="start-${tr.id}" data-edge="start" inputmode="decimal"></label>
       <label for="end-${tr.id}">To <input id="end-${tr.id}" data-edge="end" inputmode="decimal"></label>
       <span class="cutlen"></span>
+      <label for="part-${tr.id}" class="part">Use <select id="part-${tr.id}" data-part>${Object.entries(PARTS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>
       <span class="spacer"></span>
       <button type="button" class="btn quiet" data-act="hook">Find the hook</button>
       <button type="button" class="btn" data-act="play">Play cut</button>
     </div>
+    <p class="partst" role="status" hidden></p>
     <p class="warn" hidden></p>`;
   tr.el = li;
   tr.canvas = $("canvas", li);
   tr.headEl = $(".playhead", li);
+  const partIn = $("[data-part]", li);
+  partIn.value = tr.part || "full";
+  partIn.addEventListener("change", () => setPart(tr, partIn.value));
   const nameIn = $(".tname", li);
   nameIn.value = tr.name;
   nameIn.addEventListener("input", () => { tr.name = nameIn.value || tr.fileName; refreshMixPanel(); renderPads(); });
@@ -937,8 +1134,9 @@ function bindWave(tr) {
 }
 
 function drawWave(tr) {
-  const c = tr.canvas, w = c.clientWidth, h = c.clientHeight;
-  if (!w) return;
+  const c = tr.canvas;   // a restored song has no card until the list is drawn
+  if (!c || !c.clientWidth) return;
+  const w = c.clientWidth, h = c.clientHeight;
   const dpr = window.devicePixelRatio || 1;
   if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
   const g = c.getContext("2d");
@@ -973,6 +1171,10 @@ function updateCard(tr) {
   $(".num", li).textContent = i + 1;
   $(".dur", li).textContent = fmt(tr.duration, 0);
   $(".bv", li).textContent = `${Math.round(tr.beat.bpm)} BPM`;
+  // the key shows once matching is on (it's worked out from the cut, so it's skipped while idle)
+  const kv = $(".kv", li), k = state.keys ? detectKey(tr) : null;
+  kv.hidden = !k;
+  if (k) kv.textContent = k.score < KEY_SURE ? "Key unclear" : `Key ${keyName(k)}`;
   const si = $(`#start-${tr.id}`), ei = $(`#end-${tr.id}`);
   if (document.activeElement !== si) { si.value = fmt(tr.start); si.classList.remove("invalid"); }
   if (document.activeElement !== ei) { ei.value = fmt(tr.end); ei.classList.remove("invalid"); }
@@ -1004,6 +1206,8 @@ function renderAll() {
 
 function refreshMixPanel() {
   state.tracks.forEach(updateCard);
+  // a moved cut may run past the stretch already separated
+  state.tracks.forEach(t => { if (needsStems(t) && !t.stemJob) separateTrack(t).catch(() => {}); });
   const P = plan(), tl = $("#timeline"), has = P.segs.length > 0;
   tl.querySelectorAll(".seg-b").forEach(n => n.remove());
   $("#tlEmpty").hidden = has;
@@ -1034,12 +1238,28 @@ function refreshMixPanel() {
       sel.value = s.style;
       sel.addEventListener("change", () => { s.tr.trans = sel.value === state.defStyle ? null : sel.value; refreshMixPanel(); });
       j.innerHTML = '<span class="ln"></span>'; j.append(sel);
+      const notes = [];
       if (state.sync && overlapOf(s.style, 1) > 0) {
-        const note = document.createElement("span"), nx = P.segs[i + 1].tr;
-        note.className = "jn" + (s.j.r ? " ok" : "");
-        note.textContent = s.j.r ? `Tempo matched · ${Math.round(s.j.L / (s.tr.beat.period / P.rate))} beats`
-          : `${Math.round(s.tr.beat.bpm)} → ${Math.round(nx.beat.bpm)} BPM, too far apart to match`;
-        j.append(note);
+        const nx = P.segs[i + 1].tr;
+        notes.push([!!s.j.r, s.j.r ? `Tempo matched · ${Math.round(s.j.L / (s.tr.beat.period / P.rate))} beats`
+          : `${Math.round(s.tr.beat.bpm)} → ${Math.round(nx.beat.bpm)} BPM, too far apart to match`]);
+      }
+      if (state.keys) {
+        const nx = P.segs[i + 1], from = keyName({ ...detectKey(s.tr), root: detectKey(s.tr).root + Math.round(s.shift) });
+        const sh = nx.shift, n = Math.round(Math.abs(sh)), semis = n ? `${n} semitone${n === 1 ? "" : "s"}` : "slightly";
+        notes.push(nx.keyNote === "unclear" ? [false, "Key unclear, left as it is"] :
+          nx.keyNote === "far" ? [false, "Keys too far apart to match"] :
+          [true, nx.shift ? `Key matched · next song ${sh > 0 ? "up" : "down"} ${semis}` : `Keys already fit (${from})`]);
+      }
+      if (notes.length) {
+        const box = document.createElement("span");
+        box.className = "jns";
+        for (const [ok, text] of notes) {
+          const note = document.createElement("span");
+          note.className = "jn" + (ok ? " ok" : ""); note.textContent = text;
+          box.append(note);
+        }
+        j.append(box);
       }
       ol.append(j);
     }
@@ -1109,9 +1329,12 @@ function togglePreview(tr, from, fromClick) {
   stopAll();
   const c = audio(), bus = ensureBus(), rate = VIBES[state.vibe].rate;
   const until = (from >= tr.start && from < tr.end) ? tr.end : tr.duration;
-  const v = makeVoice(c, tr, bus.input, rate);
+  // a separated part only covers the cut, so listening outside it plays the whole song
+  let pb = partBuffer(tr);
+  if (from < pb.t0 || until > pb.t0 + pb.buffer.duration) pb = { buffer: tr.buffer, t0: 0 };
+  const v = makeVoice(c, tr, bus.input, rate, pb.buffer);
   const T = c.currentTime + 0.03;
-  v.src.start(T, from); v.src.stop(T + (until - from) / rate);
+  v.src.start(T, from - pb.t0); v.src.stop(T + (until - from) / rate);
   playing = { kind: "cut", tr, src: v.src, t0: T, from, until, rate };
   v.src.onended = () => { if (playing && playing.src === v.src) stopAll(); };
   tr.headEl.hidden = false;
@@ -1162,14 +1385,14 @@ function liveGo(i, at) {
       T = Math.max(T, timeAtPos(old, b));
     }
   }
-  const v = makeVoice(c, tr, bus.input, rate);
+  const pb = partBuffer(tr), v = makeVoice(c, tr, bus.input, rate, pb.buffer);
   if (r) {
     const pr = v.src.playbackRate;
     pr.setValueAtTime(rate * r, T); pr.setValueAtTime(rate * r, T + L);
     pr.linearRampToValueAtTime(rate, T + L + SYNC_RAMP);
     v.ramp = { L, R: SYNC_RAMP, r };
   }
-  v.src.start(T, tr.start);
+  v.src.start(T, tr.start - pb.t0);   // positions stay in song time (offset below)
   Object.assign(v, { startT: T, offset: tr.start, idx: i });
   if (old) {
     applyOut(c, old, style, T, L, true);
@@ -1305,15 +1528,18 @@ async function encodeOpus(buf, onP) {
 // MP3 via lamejs. Not offered inside the claude.ai viewer, whose save
 // prompt doesn't accept .mp3.
 async function mp3Available() { return typeof lamejs !== "undefined" && !(await downloadsCap); }
+// TPDF dither: a whisper of noise that turns 16-bit rounding into a smooth hiss
+// instead of grainy distortion on quiet fades.
+const dither = () => (Math.random() - Math.random());
 async function encodeMp3(buf, onP) {
-  const enc = new lamejs.Mp3Encoder(2, buf.sampleRate, 256);
+  const enc = new lamejs.Mp3Encoder(2, buf.sampleRate, 320);
   const L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
   const B = 1152 * 20, l16 = new Int16Array(B), r16 = new Int16Array(B), parts = [];
   for (let i = 0, k = 0; i < buf.length; i += B, k++) {
     const n = Math.min(B, buf.length - i);
     for (let j = 0; j < n; j++) {
-      l16[j] = clamp(L[i + j], -1, 1) * 32767;
-      r16[j] = clamp(R[i + j], -1, 1) * 32767;
+      l16[j] = clamp(Math.round(L[i + j] * 32767 + dither()), -32768, 32767);
+      r16[j] = clamp(Math.round(R[i + j] * 32767 + dither()), -32768, 32767);
     }
     const out = enc.encodeBuffer(l16.subarray(0, n), r16.subarray(0, n));
     if (out.length) parts.push(new Uint8Array(out.buffer, out.byteOffset, out.length));
@@ -1323,10 +1549,34 @@ async function encodeMp3(buf, onP) {
   if (end.length) parts.push(new Uint8Array(end.buffer, end.byteOffset, end.length));
   return new Blob(parts, { type: "audio/mpeg" });
 }
+// WAV: the mix exactly as rendered, as 24-bit PCM. Lossless and plays everywhere.
+function encodeWav(buf) {
+  const ch = 2, sr = buf.sampleRate, n = buf.length, bytes = n * ch * 3;
+  const L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+  const out = new Uint8Array(44 + bytes), dv = new DataView(out.buffer);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) out[o + i] = s.charCodeAt(i); };
+  str(0, "RIFF"); dv.setUint32(4, 36 + bytes, true); str(8, "WAVE");
+  str(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * ch * 3, true); dv.setUint16(32, ch * 3, true); dv.setUint16(34, 24, true);
+  str(36, "data"); dv.setUint32(40, bytes, true);
+  for (let i = 0, o = 44; i < n; i++) {
+    for (const x of [L[i], R[i]]) {
+      const v = clamp(Math.round(x * 8388607), -8388608, 8388607);
+      out[o++] = v & 255; out[o++] = (v >> 8) & 255; out[o++] = (v >> 16) & 255;
+    }
+  }
+  return new Blob([out], { type: "audio/wav" });
+}
+function showAudioFormat() {
+  const wav = $("#mixFmt").value === "wav";
+  $("#dlBtn").textContent = wav ? "Download WAV" : "Download MP3";
+  $("#dlNote").textContent = wav ? "WAV is lossless: exactly what you hear, in a bigger file (about 15 MB a minute)." :
+    "MP3 at 320 kbps, the highest MP3 quality. Video saves as MP4 with an animated visualizer.";
+}
 mp3Available().then(ok => {
-  if (!ok) return;
-  $("#dlBtn").textContent = "Download MP3";
-  $("#dlNote").textContent = "Audio saves as MP3 and video as MP4 with an animated visualizer.";
+  // without the MP3 encoder (inside the claude.ai viewer), the browser's own format is used
+  if (!ok) { $("#mixFmt").querySelector('[value="mp3"]').disabled = true; if ($("#mixFmt").value === "mp3") $("#mixFmt").value = "wav"; }
+  showAudioFormat();
 });
 
 async function canOpus() {
@@ -1359,7 +1609,10 @@ async function exportMix() {
     note.textContent = "Mixing…";
     const buf = await renderMix();
     let blob;
-    if (await mp3Available()) {
+    if ($("#mixFmt").value === "wav") {
+      note.textContent = "Saving WAV…";
+      blob = encodeWav(buf);
+    } else if (await mp3Available()) {
       note.textContent = "Encoding MP3…";
       blob = await encodeMp3(buf, p => (prog.value = p));
     } else if (await canOpus()) {
@@ -1370,7 +1623,7 @@ async function exportMix() {
       blob = await recordRealtime(buf, p => (prog.value = p));
     } else throw new Error("this browser can't encode audio");
     prog.value = 1;
-    const ext = blob.type.includes("mpeg") ? "mp3" : blob.type.includes("mp4") ? "mp4" : "webm";
+    const ext = blob.type.includes("wav") ? "wav" : blob.type.includes("mpeg") ? "mp3" : blob.type.includes("mp4") ? "mp4" : "webm";
     await saveFile(blob, `${safeName()}.${ext}`);
   } catch (e) {
     toast("Export failed: " + (e.message || e));
@@ -1388,7 +1641,7 @@ const FPS = 30, FFT_N = 1024, BANDS = 40;
 async function pickVideoFormat(W, H) {
   const vb = 1_800_000;
   if (typeof Mp4Muxer !== "undefined") {
-    const aac = { codec: "mp4a.40.2", sampleRate: 48000, numberOfChannels: 2, bitrate: 160000 };
+    const aac = { codec: "mp4a.40.2", sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 };
     const aOk = await AudioEncoder.isConfigSupported(aac).then(r => r.supported, () => false);
     if (aOk) for (const codec of ["avc1.42001f", "avc1.4d001f", "avc1.640028"]) {
       const cfg = { codec, width: W, height: H, bitrate: vb, framerate: FPS, avc: { format: "avc" } };
@@ -1397,7 +1650,7 @@ async function pickVideoFormat(W, H) {
     }
   }
   if (typeof WebMMuxer !== "undefined") {
-    const opus = { codec: "opus", sampleRate: 48000, numberOfChannels: 2, bitrate: 160000 };
+    const opus = { codec: "opus", sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 };
     const aOk = await AudioEncoder.isConfigSupported(opus).then(r => r.supported, () => false);
     if (aOk) for (const [codec, muxV] of [["vp09.00.10.08", "V_VP9"], ["vp8", "V_VP8"]]) {
       const cfg = { codec, width: W, height: H, bitrate: vb, framerate: FPS };
@@ -1709,9 +1962,14 @@ $("#timeline").addEventListener("click", e => {
   playMix(f * P.total).catch(() => {});
 });
 $("#dlBtn").addEventListener("click", exportMix);
+$("#mixFmt").addEventListener("change", () => { showAudioFormat(); persist(); });
 $("#vidBtn").addEventListener("click", exportVideo);
 $("#autoBtn").addEventListener("click", () => { stopAll(); autoMashup(); });
 $("#sync").addEventListener("change", e => { setSync(e.target.checked); refreshMixPanel(); });
+$("#keys").addEventListener("change", e => {
+  state.keys = e.target.checked; refreshMixPanel();
+  if (state.keys) loadStretch().catch(() => {});   // fetch the pitch shifter while they listen
+});
 $("#liveSync").addEventListener("change", e => { setSync(e.target.checked); refreshMixPanel(); });
 if (!videoSupported) $("#vidBtn").title = "Video export needs Chrome or Edge on a computer.";
 
