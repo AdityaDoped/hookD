@@ -1014,12 +1014,14 @@ function drawPopCard(g, W, H, ch, a) {
     if (p > 0) { g.save(); g.translate(W / 2, y + is / 2); g.rotate(Math.sin(a * 9) * 0.12 * Math.max(0, 1 - a / 0.9)); g.scale(p, p); drawIcon(g, ch.icon, 0, 0, is, k.accent); g.restore(); }
     y += is + igap;
   }
-  // each word drops from above and bounces when it lands, one after another
+  // each word drops from above and bounces when it lands, one after another;
+  // long headings drop faster so every word has landed by about 1.1 s
+  const step = Math.min(0.09, 0.45 / Math.max(1, words.length - 1));
   lines.forEach(line => {
     const lw = line.reduce((s, x) => s + x.sw, 0) + gap * (line.length - 1);
     let x = (W - lw) / 2;
     line.forEach(({ w, sw, i }) => {
-      const t = (a - 0.12 - i * 0.09) / 0.55;
+      const t = (a - 0.12 - i * step) / 0.5;
       if (t > 0) {
         const cy = y + lh / 2 - (1 - bounce(t)) * H * 0.4, tilt = (i % 2 ? 1 : -1) * (0.03 + rnd() * 0.04);
         g.save(); g.globalAlpha *= clamp(t * 5, 0, 1);
@@ -1033,7 +1035,7 @@ function drawPopCard(g, W, H, ch, a) {
   });
   // the small label slaps on last, tilted the other way
   if (sub) {
-    const p = easeBack((a - 0.2 - words.length * 0.09) / 0.35), text = headText(sub);
+    const p = easeBack((a - 0.2 - words.length * step) / 0.35), text = headText(sub);
     if (p > 0) {
       g.font = `700 ${sfs}px ${fontStack(k.font)}`;
       const tw = Math.min(g.measureText(text).width + sfs * 1.2, W * 0.86);
@@ -1046,15 +1048,32 @@ function drawPopBar(g, W, H, line1, line2, p, alpha) {
   const k = V.look, u = Math.min(W, H), two = !!line2, s = easeBack(p);
   if (s <= 0) return;
   const a = headText(line1 || "Your heading"), b = two ? headText(line2) : "";
-  const fs1 = Math.round(u * 0.05), fs2 = Math.round(u * 0.034), y = H * (H > W ? 0.07 : 0.08);
+  const fs1 = Math.round(u * 0.05), fs2 = Math.round(u * 0.034), y = H * (H > W ? 0.07 : 0.08), maxW = W * 0.8;
   g.save(); g.globalAlpha = alpha;
-  const f1 = fitFont(g, a, 900, fs1, W * 0.78), w1 = g.measureText(a).width + f1 * 1.1;
+  // a long heading goes on two stickers rather than shrinking to nothing
+  g.font = `900 ${fs1}px ${fontStack(k.font)}`;
+  let rows = [a];
+  if (g.measureText(a).width > maxW) {
+    const ws = a.split(/\s+/);
+    let best = 1, diff = Infinity;
+    for (let i = 1; i < ws.length; i++) {
+      const d = Math.abs(g.measureText(ws.slice(0, i).join(" ")).width - g.measureText(ws.slice(i).join(" ")).width);
+      if (d < diff) { diff = d; best = i; }
+    }
+    rows = [ws.slice(0, best).join(" "), ws.slice(best).join(" ")];
+  }
+  const f1 = Math.min(...rows.map(r => fitFont(g, r, 900, fs1, maxW))), rh = f1 * 1.45;
   const wobble = Math.sin(p * 0.5 * 14) * 0.06 * Math.max(0, 1 - p);
-  drawSticker(g, W / 2, y + f1 * 0.7, w1, f1 * 1.45, -0.025 + wobble, s, k.hiBox, k.hiInk, a, 900, f1);
+  let w1 = 0;
+  rows.forEach((r, i) => {
+    g.font = `900 ${f1}px ${fontStack(k.font)}`;
+    const w = g.measureText(r).width + f1 * 1.1; w1 = Math.max(w1, w);
+    drawSticker(g, W / 2 + (i ? f1 * 0.3 : 0), y + rh / 2 + i * rh * 1.05, w, rh, (i ? 0.02 : -0.025) + wobble, easeBack(p - i * 0.12), k.hiBox, k.hiInk, r, 900, f1);
+  });
   if (two) {
-    const s2 = easeBack(p - 0.25);
+    const s2 = easeBack(p - 0.25), top = y + rh * (1.05 * (rows.length - 1) + 1);
     const f2 = fitFont(g, b, 700, fs2, W * 0.7), w2 = g.measureText(b).width + f2 * 1.2;
-    if (s2 > 0) drawSticker(g, W / 2 + w1 * 0.18, y + f1 * 1.45 + f2 * 0.9, w2, f2 * 1.7, 0.04, s2, k.accent, k.bg, b, 700, f2);
+    if (s2 > 0) drawSticker(g, W / 2 + w1 * 0.18, top + f2 * 0.9, w2, f2 * 1.7, 0.04, s2, k.accent, k.bg, b, 700, f2);
   }
   g.restore();
 }
