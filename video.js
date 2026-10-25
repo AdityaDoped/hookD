@@ -932,20 +932,131 @@ function drawIcon(g, name, cx, cy, s, color) {
 // A chapter at local time a (seconds since it started): the full card, then the pinned heading.
 // "center": the card has a picture above a big centred heading, and the heading moves
 // to the top bar when the card ends. "top": the heading bar is up from the start,
-// with the picture in the middle of the card.
+// with the picture in the middle of the card. "pop": like "center", but each word drops
+// in as a bouncing sticker, and the pinned heading is a sticker that springs in.
 const chapLayout = () => V.look.chapLayout || "center";
 function drawChapter(g, W, H, x, a) {
-  const ch = x.ch, len = x.t1 - x.t0, out = clamp((len - a) / 0.3, 0, 1), centred = chapLayout() === "center";
+  const ch = x.ch, len = x.t1 - x.t0, out = clamp((len - a) / 0.3, 0, 1), lay = chapLayout(), centred = lay !== "top";
   if (a < ch.card) {
     const u = Math.min(W, H), k = V.look, tall = H > W, fadeIn = clamp(a / 0.2, 0, 1);
     g.save(); g.globalAlpha = fadeIn * (ch.card - a < 0.15 ? (ch.card - a) / 0.15 : 1);
     g.fillStyle = k.bg; g.fillRect(0, 0, W, H);
-    if (centred) drawCentredCard(g, W, H, ch, a);
+    if (lay === "pop") drawPopCard(g, W, H, ch, a);
+    else if (centred) drawCentredCard(g, W, H, ch, a);
     else drawIcon(g, ch.icon, W / 2, H * (tall ? 0.56 : 0.6), u * (tall ? 0.5 : 0.36) * (0.85 + 0.15 * ease(a / 0.5)), k.accent);
     g.restore();
   }
   if (!centred) drawTopBar(g, W, H, ch.text.trim(), ch.sub.trim(), a / 0.5, out);
-  else if (a >= ch.card) drawTopBar(g, W, H, ch.text.trim(), ch.sub.trim(), (a - ch.card) / 0.5, out);
+  else if (a >= ch.card) (lay === "pop" ? drawPopBar : drawTopBar)(g, W, H, ch.text.trim(), ch.sub.trim(), (a - ch.card) / 0.5, out);
+}
+// Springy easings for the "pop" style: overshoot then settle, and a ball-drop bounce.
+const easeBack = p => { p = clamp(p, 0, 1) - 1; return 1 + 2.9 * p * p * p + 1.9 * p * p; };
+function bounce(p) {
+  p = clamp(p, 0, 1);
+  if (p < 1 / 2.75) return 7.5625 * p * p;
+  if (p < 2 / 2.75) return 7.5625 * (p -= 1.5 / 2.75) * p + 0.75;
+  if (p < 2.5 / 2.75) return 7.5625 * (p -= 2.25 / 2.75) * p + 0.9375;
+  return 7.5625 * (p -= 2.625 / 2.75) * p + 0.984375;
+}
+// Repeatable "random" numbers from a string, so a chapter looks the same every frame and every export.
+function seeded(str) {
+  let h = 2166136261;
+  for (const c of str) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  return () => { h = Math.imul(h ^ (h >>> 15), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967296; };
+}
+// A sticker: a tilted rounded box with a thick outline and a hard shadow, text in the middle.
+function drawSticker(g, cx, cy, w, h, tilt, scale, fill, ink, text, weight, fs) {
+  const k = V.look, u = Math.min(g.canvas.width, g.canvas.height), lw = Math.max(2, u * 0.006), off = u * 0.012;
+  g.save(); g.translate(cx, cy); g.rotate(tilt); g.scale(scale, scale);
+  g.fillStyle = k.ink; g.beginPath(); g.roundRect(-w / 2 + off, -h / 2 + off, w, h, h * 0.28); g.fill();
+  g.fillStyle = fill; g.beginPath(); g.roundRect(-w / 2, -h / 2, w, h, h * 0.28); g.fill();
+  g.lineWidth = lw; g.strokeStyle = k.ink; g.stroke();
+  g.fillStyle = ink; g.textAlign = "center"; g.textBaseline = "middle";
+  g.font = `${weight} ${fs}px ${fontStack(k.font)}`; g.fillText(text, 0, fs * 0.04);
+  g.restore();
+}
+// Sticker colours take turns between the highlight colours and the accent.
+const popColors = k => [[k.hiBox, k.hiInk], [k.accent, k.bg]];
+function drawPopCard(g, W, H, ch, a) {
+  const k = V.look, u = Math.min(W, H), tall = H > W, icon = ch.icon && ch.icon !== "none";
+  const words = headText(ch.text.trim() || "Your heading").split(/\s+/), sub = ch.sub.trim();
+  const rnd = seeded(ch.text + "|" + ch.sub), cols = popColors(k);
+  // confetti: dots and little bars that pop in above and below the words, and drift
+  for (let i = 0; i < 9; i++) {
+    const x = W * (0.08 + (i / 8) * 0.84 + (rnd() - 0.5) * 0.08), y = H * (i % 2 ? 0.8 + rnd() * 0.13 : 0.07 + rnd() * 0.13);
+    const s = u * (0.018 + rnd() * 0.022), rot = rnd() * Math.PI + a * (rnd() - 0.5) * 2, p = easeBack((a - i * 0.04) / 0.35);
+    if (p <= 0) continue;
+    g.save(); g.translate(x, y - a * u * 0.02); g.rotate(rot); g.scale(p, p);
+    g.fillStyle = [k.accent, k.hiBox === k.bg ? k.accent : k.hiBox, k.ink][i % 3];
+    if (i % 3 === 1) { g.beginPath(); g.arc(0, 0, s, 0, Math.PI * 2); g.fill(); }
+    else { g.beginPath(); g.roundRect(-s * 1.4, -s * 0.35, s * 2.8, s * 0.7, s * 0.35); g.fill(); }
+    g.restore();
+  }
+  // lay the words out in lines of stickers, shrinking until they fit in three lines
+  let fs = Math.round(u * (tall ? 0.088 : 0.07)), lines, padX, sh, gap;
+  for (;;) {
+    g.font = `900 ${fs}px ${fontStack(k.font)}`;
+    padX = fs * 0.32; sh = fs * 1.35; gap = fs * 0.22;
+    const ws = words.map(w => g.measureText(w).width + padX * 2), maxW = W * 0.86;
+    lines = [[]]; let lineW = 0;
+    words.forEach((w, i) => {
+      if (lines.at(-1).length && lineW + gap + ws[i] > maxW) { lines.push([]); lineW = 0; }
+      lineW += (lines.at(-1).length ? gap : 0) + ws[i]; lines.at(-1).push({ w, sw: ws[i], i });
+    });
+    if ((lines.length <= 3 && Math.max(...ws) <= maxW) || fs <= 10) break;
+    fs = Math.floor(fs * 0.9);
+  }
+  const is = u * (tall ? 0.26 : 0.2), igap = u * 0.06, lh = sh + gap * 1.2, sfs = Math.round(fs * 0.5);
+  const blockH = (icon ? is + igap : 0) + lines.length * lh + (sub ? igap * 0.5 + sfs * 1.8 : 0);
+  let y = (H - blockH) / 2;
+  if (icon) {
+    const p = easeBack(a / 0.4);
+    if (p > 0) { g.save(); g.translate(W / 2, y + is / 2); g.rotate(Math.sin(a * 9) * 0.12 * Math.max(0, 1 - a / 0.9)); g.scale(p, p); drawIcon(g, ch.icon, 0, 0, is, k.accent); g.restore(); }
+    y += is + igap;
+  }
+  // each word drops from above and bounces when it lands, one after another
+  lines.forEach(line => {
+    const lw = line.reduce((s, x) => s + x.sw, 0) + gap * (line.length - 1);
+    let x = (W - lw) / 2;
+    line.forEach(({ w, sw, i }) => {
+      const t = (a - 0.12 - i * 0.09) / 0.55;
+      if (t > 0) {
+        const cy = y + lh / 2 - (1 - bounce(t)) * H * 0.4, tilt = (i % 2 ? 1 : -1) * (0.03 + rnd() * 0.04);
+        g.save(); g.globalAlpha *= clamp(t * 5, 0, 1);
+        const [fill, ink] = cols[i % 2];
+        drawSticker(g, x + sw / 2, cy, sw, sh, tilt, 1, fill, ink, w, 900, fs);
+        g.restore();
+      } else rnd();
+      x += sw + gap;
+    });
+    y += lh;
+  });
+  // the small label slaps on last, tilted the other way
+  if (sub) {
+    const p = easeBack((a - 0.2 - words.length * 0.09) / 0.35), text = headText(sub);
+    if (p > 0) {
+      g.font = `700 ${sfs}px ${fontStack(k.font)}`;
+      const tw = Math.min(g.measureText(text).width + sfs * 1.2, W * 0.86);
+      drawSticker(g, W / 2, y + igap * 0.5 + sfs * 0.9, tw, sfs * 1.8, -0.05, p, k.ink, k.bg, text, 700, sfs);
+    }
+  }
+}
+// The pinned heading in the "pop" style: a sticker that springs in at the top and wobbles to rest.
+function drawPopBar(g, W, H, line1, line2, p, alpha) {
+  const k = V.look, u = Math.min(W, H), two = !!line2, s = easeBack(p);
+  if (s <= 0) return;
+  const a = headText(line1 || "Your heading"), b = two ? headText(line2) : "";
+  const fs1 = Math.round(u * 0.05), fs2 = Math.round(u * 0.034), y = H * (H > W ? 0.07 : 0.08);
+  g.save(); g.globalAlpha = alpha;
+  const f1 = fitFont(g, a, 900, fs1, W * 0.78), w1 = g.measureText(a).width + f1 * 1.1;
+  const wobble = Math.sin(p * 0.5 * 14) * 0.06 * Math.max(0, 1 - p);
+  drawSticker(g, W / 2, y + f1 * 0.7, w1, f1 * 1.45, -0.025 + wobble, s, k.hiBox, k.hiInk, a, 900, f1);
+  if (two) {
+    const s2 = easeBack(p - 0.25);
+    const f2 = fitFont(g, b, 700, fs2, W * 0.7), w2 = g.measureText(b).width + f2 * 1.2;
+    if (s2 > 0) drawSticker(g, W / 2 + w1 * 0.18, y + f1 * 1.45 + f2 * 0.9, w2, f2 * 1.7, 0.04, s2, k.accent, k.bg, b, 700, f2);
+  }
+  g.restore();
 }
 function drawCentredCard(g, W, H, ch, a) {
   const k = V.look, u = Math.min(W, H), tall = H > W, icon = ch.icon && ch.icon !== "none";
@@ -2619,7 +2730,7 @@ window.hookd = {
         }
         if (l.font != null) { V.look.font = oneOf(l.font, Object.keys(FONTS), "look.font"); V.look.theme = "custom"; }
         if (l.caps != null) V.look.caps = !!l.caps;
-        if (l.chapLayout != null) V.look.chapLayout = oneOf(l.chapLayout, ["center", "top"], "look.chapLayout");
+        if (l.chapLayout != null) V.look.chapLayout = oneOf(l.chapLayout, ["center", "top", "pop"], "look.chapLayout");
       }
       if (p.captionStyle) {
         const c = p.captionStyle;

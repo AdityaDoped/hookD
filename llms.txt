@@ -71,7 +71,8 @@ hookd.video.set({                   // change any settings; returns the new stat
   // or look: { savedStyle: "Finance Playbook" }
   // or individual parts: { bg: "#FBF7EA", ink: "#1F1F1F", accent: "#2F6DB5",
   //    hiBox: "#D9FF3F", hiInk: "#111111", font: "lato" | "figtree" | "poppins" | "serif", caps: true,
-  //    chapLayout: "center" | "top" }   (a theme keeps the current chapLayout)
+  //    chapLayout: "center" | "top" | "pop" }   (a theme keeps the current chapLayout;
+  //    "pop" = Bouncy stickers: words drop in one by one and bounce)
   captionStyle: { style: "box", size: "m", pos: "bottom", burn: true },
   //    style: "bar" | "bold" | "box" (Highlight); size: "s" | "m" | "l"; pos: "bottom" | "middle"
   title: { on: true, style: "cover", text: "Lesson 1: Getting started", sub: "by Your Name", dur: 3 },
