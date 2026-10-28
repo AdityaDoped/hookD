@@ -1364,7 +1364,11 @@ function sizePreview() {
 function nowT() {
   if (!V.playing || !pa) return V.T;
   const c = audio(), lat = c.outputLatency || c.baseLatency || 0;
-  return pa.T + Math.max(0, c.currentTime - pa.t0 - lat);
+  // phones move the audio clock in steps; the output timestamp says when it last stepped, so the
+  // playhead glides between steps instead of jerking
+  const ts = c.getOutputTimestamp && c.getOutputTimestamp();
+  const now = ts && ts.performanceTime ? ts.contextTime + (performance.now() - ts.performanceTime) / 1000 : c.currentTime - lat;
+  return (pa.last = Math.max(pa.last, pa.T + Math.max(0, now - pa.t0)));
 }
 function vPlay() {
   if (!V.clips.length || V.exporting) return;
@@ -1417,7 +1421,7 @@ function soundStart(P, T) {
     src.start(t0, (V.music.from + T) % src.buffer.duration);
     nodes.push(src);
   }
-  pa = { nodes, out, t0, T };
+  pa = { nodes, out, t0, T, last: T };
 }
 function soundStop() {
   if (!pa) return;
@@ -1432,6 +1436,7 @@ function stepFrames(n) {
   vPause(); vSeek(V.T + n / (c.src.fps || 30));
 }
 
+function seekPlayer(e, t) { e.currentTime = t; e.seekAt = performance.now(); }
 // Put the players on the videos the timeline needs at time T (photos need none).
 function syncPlayers(P, T) {
   const vid = it => it.kind === "clip" && !it.c.src.photo;
@@ -1453,18 +1458,23 @@ function syncPlayers(P, T) {
     if (!e) continue;
     pv.map.set(w.it.c.id, e);
     if (e.dataset.src !== String(c.src.id)) { e.src = c.src.url; e.dataset.src = c.src.id; }
-    const drift = e.currentTime - w.t, off = Math.abs(drift);
     e.muted = true;   // the sound comes from the audio clock (see soundStart)
+    // a phone can take longer than a frame to seek: asking again before it lands starts it over,
+    // so the same moment plays again and again. Let it land, and remember how long it took.
+    if (e.seeking) continue;
+    if (e.seekAt) { e.seekLag = Math.min(1, (performance.now() - e.seekAt) / 1000); e.seekAt = 0; }
+    const drift = e.currentTime - w.t, off = Math.abs(drift);
     if (w.on && V.playing) {
-      // a player takes a moment to get going, so it starts a little ahead
-      if (e.paused) { e.currentTime = Math.min(c.out, w.t + 0.12); e.playbackRate = 1; }
-      else if (off > 0.5) { e.currentTime = w.t; e.playbackRate = 1; }
+      // a player takes a moment to get going, so it starts ahead by about as long as a seek takes
+      const lead = Math.max(0.12, e.seekLag || 0);
+      if (e.paused) { seekPlayer(e, Math.min(c.out, w.t + lead)); e.playbackRate = 1; }
+      else if (off > 0.5) { seekPlayer(e, Math.min(c.out, w.t + lead)); e.playbackRate = 1; }
       else e.playbackRate = clamp(1 - drift * 3, 0.8, 1.25);   // ease back into step with the sound
       if (e.paused) e.play().catch(() => {});
     } else {
       if (!e.paused) e.pause();
       e.playbackRate = 1;
-      if (off > 0.02) e.currentTime = w.t;
+      if (off > 0.02) seekPlayer(e, w.t);
     }
   }
 }
@@ -1797,8 +1807,8 @@ tl.cv.addEventListener("pointerdown", e => {
     tl.drag = { kind: "trim", i: h.i, edge: h.edge, x0: x, orig: { in: c.in, out: c.out }, before: snap(), pps: pps() };
     V.sel = h.i; V.selJoin = -1;
   } else if (touch && (y < tl.clipY || Math.abs(x - xOf(V.T)) <= 20)) {   // fingers need a wide handle
-    tl.drag = { kind: "scrub" };
-    vSeek(tOf(x));
+    tl.drag = { kind: "scrub", resume: V.playing };   // scrubbing pauses, and playing picks up again on release
+    vPause(); vSeek(tOf(x));
   } else if (touch) {
     tl.drag = { kind: "pan", x0: x, sl: tl.box.scrollLeft, moved: false, h, onMusic: y >= tl.musY };
     if (h) tl.hold = setTimeout(() => {
@@ -1812,8 +1822,8 @@ tl.cv.addEventListener("pointerdown", e => {
     startMove(h.i, x);
     vSeek(tOf(x));
   } else {
-    tl.drag = { kind: "scrub" };
-    vSeek(y >= tl.musY ? nearestBeat(tOf(x)) : tOf(x));   // a click on the music lane lands on a beat
+    tl.drag = { kind: "scrub", resume: V.playing };
+    vPause(); vSeek(y >= tl.musY ? nearestBeat(tOf(x)) : tOf(x));   // a click on the music lane lands on a beat
   }
   updateUi();
 });
@@ -1873,6 +1883,7 @@ function endDrag(e) {
   const d = tl.drag; tl.drag = null;
   if (!d || d.kind === "pinch") return;
   tl.cv.style.cursor = "";
+  if (d.kind === "scrub") { if (d.resume) vPlay(); updateUi(); return; }
   if (d.kind === "pan") {   // a tap: select the clip under the finger and go there
     if (!d.moved) { if (d.h) { V.sel = d.h.i; V.selJoin = -1; } vSeek(d.onMusic ? nearestBeat(tOf(d.x0)) : tOf(d.x0)); }
     updateUi();
@@ -2793,7 +2804,8 @@ function vLoop() {
   vtick();
   if (V.playing && !(tl.drag && tl.drag.kind === "pan")) {   // keep the playhead in view
     const x = xOf(V.T), w = tl.box.clientWidth;
-    if (x > w - 40 || x < 0) tl.box.scrollLeft += x - 60;
+    if (x < 0 || x > w) tl.box.scrollLeft += x - 60;            // jumped out of view
+    else if (x > w * 0.7) tl.box.scrollLeft += x - w * 0.7;     // then the timeline glides along with it
   }
   drawTimeline();
   $("#vTime").textContent = `${fmt(V.T, 1)} / ${fmt(vtotal(), 1)}`;
