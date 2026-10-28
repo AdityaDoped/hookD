@@ -1221,7 +1221,7 @@ function refreshMixPanel() {
     d.style.left = (s.at / P.total * 100) + "%";
     d.style.width = (s.len / P.total * 100) + "%";
     d.style.setProperty("--c", colorVar(s.tr));
-    d.title = s.tr.name;
+    d.title = s.tr.name; d.dataset.id = s.tr.id;
     tl.insertBefore(d, $("#tlHead"));
   });
   $("#tlTotal").textContent = fmt(P.total, 0);
@@ -1281,13 +1281,66 @@ function refreshMixPanel() {
     $("#mTime").textContent = has ? (ok ? `${P.segs.length} songs · ${fmt(P.total, 0)}` : "Fix the cut marked in red") : "";
     $("#mProg").style.width = "0";
   }
+  markMsel();
   persist();
 }
 function updateMbar() {
   const show = state.tracks.length > 0 && state.mode === "build";
   $("#mbar").hidden = !show;
   document.body.classList.toggle("has-mbar", show);
+  setMfull();
 }
+
+/* ---------- Build mode on a phone ----------
+   With songs in, the page's parts move into a fixed screen like the video
+   editor's: the mashup strip on top, one song or one set of settings below and
+   tabs at the bottom, so nothing has to be scrolled to. They move back on a wider screen. */
+const mPhone = matchMedia("(max-width: 939px)");
+const mMoves = [
+  ["#mStrip", ["#tlWrap", "#mix > .scale", "#mix > .transport"]],
+  ["#mSong", ["#list", "#status", "#drop", "#listHead"]],   // the song first, adding more below it
+  ["#mJoins", ["#mix > .mix-head", "#mix > .field", "#mix > .check", "#order"]],
+  ["#mVibe", ["#vibeBar"]],
+  ["#mSaveP", ["#mix > .export"]],
+].map(([to, sels]) => [$(to), sels.flatMap(s => [...document.querySelectorAll(s)])]);
+const mHome = new Map();   // each moved part -> the marker where it sits on a wide screen
+let mTab = "song", mSel = null, mCount = 0;   // the open tab, the song being edited (id), songs last seen
+function setMfull() {
+  const on = state.mode === "build" && mPhone.matches && state.tracks.length > 0;
+  if (on === document.body.classList.contains("mfull")) return;
+  document.body.classList.toggle("mfull", on);
+  $("#mShell").hidden = !on;
+  for (const [to, els] of mMoves) for (const el of els) {
+    if (on) { const home = document.createComment(""); el.before(home); mHome.set(el, home); to.append(el); }
+    else mHome.get(el).replaceWith(el);
+  }
+  if (on) showMtab(mTab);
+  requestAnimationFrame(() => state.tracks.forEach(drawWave));
+}
+function showMtab(name) {
+  mTab = name;
+  document.querySelectorAll("#mTabs [data-mtab]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mtab === name));
+  document.querySelectorAll(".mpanel").forEach(p => (p.hidden = p.dataset.mtab !== name));
+  if (name === "song") requestAnimationFrame(() => state.tracks.forEach(drawWave));
+}
+// Only the chosen song's card shows on a phone; the first of newly added songs becomes the chosen one.
+function markMsel() {
+  const n = state.tracks.length;
+  if (n > mCount) mSel = state.tracks[mCount].id;
+  else if (!state.tracks.some(t => t.id === mSel)) mSel = n ? state.tracks[0].id : null;
+  mCount = n;
+  state.tracks.forEach(t => t.el && t.el.classList.toggle("msel", t.id === mSel));
+  document.querySelectorAll("#timeline .seg-b").forEach(d => d.classList.toggle("msel", +d.dataset.id === mSel));
+}
+function pickSong(id) {
+  mSel = id; markMsel(); showMtab("song");
+  const tr = state.tracks.find(t => t.id === id);
+  if (tr) requestAnimationFrame(() => drawWave(tr));
+}
+mPhone.addEventListener("change", setMfull);
+$("#mTabs").addEventListener("click", e => { const b = e.target.closest("[data-mtab]"); if (b) showMtab(b.dataset.mtab); });
+$("#mSave").addEventListener("click", () => showMtab("save"));
+document.querySelector(".mmodes").addEventListener("click", e => { const b = e.target.closest("[data-mode]"); if (b && b.dataset.mode !== "build") setMode(b.dataset.mode); });
 
 function renderPads() {
   const pads = $("#pads");
@@ -1959,9 +2012,18 @@ $("#snap").addEventListener("change", e => { state.snap = e.target.checked; stat
 ["#mixName", "#vidShape", "#vidLen", "#liveStyle", "#liveLen", "#quant", "#auto"].forEach(s => $(s).addEventListener("change", persist));
 $("#playMix").addEventListener("click", () => playMix(0));
 $("#timeline").addEventListener("click", e => {
-  if (!state.tracks.length || !allValid()) return;
+  if (!state.tracks.length) return;
   const r = e.currentTarget.getBoundingClientRect(), f = clamp((e.clientX - r.left) / r.width, 0, 0.999);
   const P = plan();
+  if (document.body.classList.contains("mfull")) {
+    // on a phone a tap picks the song to edit (the one on the tapped row where two overlap);
+    // while the mashup plays, it also jumps there
+    const t = f * P.total, row = e.clientY - r.top > r.height / 2 ? 1 : 0, at = s => t >= s.at && t < s.at + s.len;
+    const s = P.segs.find((s, i) => i % 2 === row && at(s)) || P.segs.find(at);
+    if (s) pickSong(s.tr.id);
+    if (!(playing && playing.kind === "mix")) return;
+  }
+  if (!allValid()) return;
   if (playing && playing.kind === "mix") stopAll();
   playMix(f * P.total).catch(() => {});
 });

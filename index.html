@@ -322,6 +322,37 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .vtl canvas { position: sticky; left: 0; display: block; touch-action: none; }
 /* On a phone the editor fills the screen like an app: the preview and timeline stay put
    and only the tool sheet scrolls. video.js adds body.vfull. */
+/* Build mode on a phone (body.mfull): the mashup strip stays at the top, one song's
+   editor or one set of settings scrolls below, tabs at the bottom. */
+.mshell { position: fixed; inset: 0; z-index: 8; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto;
+  background: var(--bg); padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+body.mfull { overflow: hidden; }
+body.mfull .mbar { display: none !important; }
+body.mfull .toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 76px); }
+.mtop { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; }
+.mtop .btn { padding-block: 8px; }
+.mmodes { flex-wrap: nowrap; }
+.mmodes button { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; font-size: 13px; }
+.mstrip { display: grid; gap: 10px; padding: 4px 12px 10px; border-bottom: 1px solid var(--line); }
+.mstrip .scale { margin-top: -6px; }
+.mstrip .timeline { height: 54px; }
+.mstrip .timeline .seg-b { height: 22px; }
+.mstrip .timeline .seg-b.r1 { top: 28px; }
+.mstrip .timeline .seg-b.msel { outline: 2px solid var(--ink); outline-offset: 1px; z-index: 1; }
+.mstrip .transport .btn { flex: 1; }
+.msheet { overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; }
+.mpanel { display: grid; gap: 14px; align-content: start; }
+.mpanel .mix-head h2 { font-size: 1.2rem; }
+.mpanel .vibe { display: grid; gap: 8px; }
+body.mfull #list > li:not(.msel) { display: none; }
+body.mfull #mSong .list-head { margin: 0; }
+body.mfull #mSong .status { margin: 0; }
+body.mfull #mSong .status:empty { display: none; }
+body.mfull #mSong .drop { padding: 12px 14px; gap: 10px; }
+body.mfull #mSong .drop .txt p:not(.big) { display: none; }
+.mtabs { display: flex; flex-wrap: nowrap; gap: 2px; padding: 6px 6px 4px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: var(--surface); }
+.mtabs button { flex: 1 0 62px; display: inline-flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 2px; font-size: 11.5px; border-radius: 10px; }
+.mtabs button svg { width: 20px; height: 20px; }
 .vtop, .vsheet-x { display: none; }
 @media (max-width: 939px) {
   body.vfull { overflow: hidden; }
@@ -521,7 +552,7 @@ img { max-width: 100%; }
       <label class="check"><input type="checkbox" id="sync" checked><span>Match tempos in transitions<small>The next song speeds up or slows down to lock onto the beat, then eases back.</small></span></label>
       <label class="check"><input type="checkbox" id="keys"><span>Match keys in transitions<small>Tunes the next song up or down a little, without changing its speed, so the two songs sound in tune together.</small></span></label>
 
-      <div>
+      <div id="tlWrap">
         <div class="timeline" id="timeline" title="Click to play from here"><div class="tl-empty" id="tlEmpty">Your timeline will appear here</div><div class="head" id="tlHead" hidden></div></div>
       </div>
       <div class="scale"><span>0:00</span><span id="tlTotal">0:00</span></div>
@@ -563,6 +594,31 @@ img { max-width: 100%; }
         <small id="dlNote">MP3 at 320 kbps, the highest MP3 quality. Video saves as MP4 with an animated visualizer.</small>
       </div>
     </aside>
+
+    <!-- On a phone with songs in, the parts above move into this fixed screen (app.js, setMfull) -->
+    <div class="mshell" id="mShell" hidden>
+      <div class="mtop">
+        <div class="seg mmodes" role="group" aria-label="Mode">
+          <button type="button" data-mode="build" aria-pressed="true" aria-label="Build a mashup"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>Mashup</button>
+          <button type="button" data-mode="live" aria-pressed="false" aria-label="Live DJ"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>DJ</button>
+          <button type="button" data-mode="video" aria-pressed="false" aria-label="Edit a video"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="M16.5 10l5-3v10l-5-3"/></svg>Video</button>
+        </div>
+        <button type="button" class="btn primary" id="mSave">Save</button>
+      </div>
+      <div class="mstrip" id="mStrip"></div>
+      <div class="msheet">
+        <div class="mpanel" data-mtab="song" id="mSong"></div>
+        <div class="mpanel" data-mtab="joins" id="mJoins" hidden></div>
+        <div class="mpanel" data-mtab="vibe" id="mVibe" hidden></div>
+        <div class="mpanel" data-mtab="save" id="mSaveP" hidden></div>
+      </div>
+      <div class="seg mtabs" id="mTabs" role="group" aria-label="Mashup tools">
+        <button type="button" data-mtab="song" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10M21 12h0"/></svg>Song</button>
+        <button type="button" data-mtab="joins" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="8" height="12" rx="1.5"/><rect x="13.5" y="6" width="8" height="12" rx="1.5"/><path d="M8 12h8M13.5 9.5 16 12l-2.5 2.5"/></svg>Joins</button>
+        <button type="button" data-mtab="vibe" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>Vibe</button>
+        <button type="button" data-mtab="save" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Save</button>
+      </div>
+    </div>
   </div>
 
   <!-- LIVE -->
