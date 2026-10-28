@@ -1760,9 +1760,9 @@ function startMove(i, x) {
   const b = boxes().find(b => b.i === i);
   tl.drag = { kind: "move", i, x0: x, x, grab: x - xOf(b.t0), moved: false };
 }
-// With a finger, a swipe scrolls the timeline and a tap selects or seeks, so nothing moves by
-// accident: hold a clip to drag it somewhere else, and pinch to zoom. Edges, captions and
-// transitions work as with a mouse.
+// With a finger, sliding on the ruler or the playhead scrubs, a swipe anywhere else scrolls the
+// timeline and a tap selects or seeks, so nothing moves by accident: hold a clip to drag it
+// somewhere else, and pinch to zoom. Edges, captions and transitions work as with a mouse.
 tl.cv.addEventListener("pointerdown", e => {
   if (!V.clips.length || V.exporting || e.button !== 0) return;
   const x = e.offsetX, y = e.offsetY, touch = e.pointerType === "touch";
@@ -1796,6 +1796,9 @@ tl.cv.addEventListener("pointerdown", e => {
     const c = V.clips[h.i];
     tl.drag = { kind: "trim", i: h.i, edge: h.edge, x0: x, orig: { in: c.in, out: c.out }, before: snap(), pps: pps() };
     V.sel = h.i; V.selJoin = -1;
+  } else if (touch && (y < tl.clipY || Math.abs(x - xOf(V.T)) <= 20)) {   // fingers need a wide handle
+    tl.drag = { kind: "scrub" };
+    vSeek(tOf(x));
   } else if (touch) {
     tl.drag = { kind: "pan", x0: x, sl: tl.box.scrollLeft, moved: false, h, onMusic: y >= tl.musY };
     if (h) tl.hold = setTimeout(() => {
