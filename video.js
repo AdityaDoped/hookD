@@ -1231,7 +1231,9 @@ let pa = null;   // the sound now playing: { nodes, out, t0, T }
 function sizePreview() {
   const [W, H] = outSize(), stage = $(".vstage"), ar = W / H;
   pv.W = W; pv.H = H;
-  const maxW = stage.clientWidth || 640, maxH = Math.max(220, window.innerHeight * 0.56);
+  // on a phone the preview takes whatever height the fixed screen leaves it
+  const maxW = stage.clientWidth || 640, maxH = document.body.classList.contains("vfull")
+    ? Math.max(60, stage.clientHeight - $(".vtransport").offsetHeight - 4) : Math.max(220, window.innerHeight * 0.56);
   const w = Math.min(maxW, maxH * ar), h = w / ar, dpr = window.devicePixelRatio || 1;
   pv.box.style.width = Math.round(w) + "px"; pv.box.style.height = Math.round(h) + "px";
   const cw = Math.round(w * dpr), ch = Math.round(h * dpr);
@@ -1370,11 +1372,15 @@ function vtick() {
 }
 
 /* ---------- Timeline drawing ---------- */
-const tl = { box: $("#vtl"), inner: $("#vtlInner"), cv: $("#vtlCanvas"), pad: 16, h: 182, clipY: 30, clipH: 84, capY: 119, capH: 24, musY: 149, musH: 26, drag: null, col: null };
+// lane sizes: roomy on a laptop, compact on a phone so the preview keeps its space
+const TL_ROOMY = { h: 182, clipY: 30, clipH: 84, capY: 119, capH: 24, musY: 149, musH: 26 };
+const TL_PHONE = { h: 136, clipY: 24, clipH: 60, capY: 88, capH: 20, musY: 112, musH: 20 };
+const tl = { box: $("#vtl"), inner: $("#vtlInner"), cv: $("#vtlCanvas"), pad: 16, ...TL_ROOMY, drag: null, col: null, fingers: new Map(), hold: 0 };
 const fitPps = () => (tl.box.clientWidth - 2 * tl.pad) / Math.max(vtotal(), 1);
 // the scale holds still during a drag, so a trimmed edge stays under the pointer
 const pps = () => (tl.drag && tl.drag.pps) || fitPps() * V.zoom;
 function sizeTimeline() {
+  Object.assign(tl, document.body.classList.contains("vfull") ? TL_PHONE : TL_ROOMY);
   const w = tl.box.clientWidth, dpr = window.devicePixelRatio || 1;
   tl.inner.style.width = Math.max(w, vtotal() * pps() + 2 * tl.pad) + "px";
   tl.inner.style.height = tl.h + "px";
@@ -1471,7 +1477,7 @@ function drawTitleBox(g, x0, x1) {
   g.fillStyle = V.look.ink; g.font = `600 12px ${C.body || "sans-serif"}`; g.textBaseline = "middle";
   g.fillText("Title card", l + 8, tl.clipY + 14, Math.max(0, w - 16));
   g.font = `12px ${C.body || "sans-serif"}`;
-  g.fillText(V.title.text.trim() || "Your title here", l + 8, tl.clipY + 44, Math.max(0, w - 16));
+  g.fillText(V.title.text.trim() || "Your title here", l + 8, tl.clipY + tl.clipH * 0.52, Math.max(0, w - 16));
   g.restore();
 }
 function drawClip(g, c, x0, x1, selected, alpha) {
@@ -1485,7 +1491,7 @@ function drawClip(g, c, x0, x1, selected, alpha) {
   g.lineWidth = selected ? 2.5 : 1; g.strokeStyle = selected ? C.ink : col; g.stroke();
   g.clip();
   // sound waveform, so pauses and mistakes are easy to spot
-  const s = c.src, mid = y + 54, amp = 22, p = pps();
+  const s = c.src, mid = y + h * 0.64, amp = h * 0.26, p = pps();
   if (s.peaks) {
     g.fillStyle = col;
     for (let px = Math.max(Math.floor(l), 0); px < Math.min(l + w, W); px += 2) {
@@ -1563,7 +1569,7 @@ function drawMusic(g, P, W) {
 }
 
 /* ---------- Timeline pointer: select, scrub, trim, reorder, transitions ---------- */
-const EDGE = 7;
+const EDGE = matchMedia("(pointer: coarse)").matches ? 14 : 7;   // a fingertip needs a wider edge to grab
 function hit(x, y) {
   if (y >= tl.capY && y <= tl.capY + tl.capH) {
     // the caption under the pointer wins, so where two captions touch, the side you
@@ -1606,10 +1612,29 @@ function insertAt(d) {
   for (const b of boxes()) { if (b.it.kind !== "clip" || b.i === d.i) continue; if (t > (b.t0 + b.t1) / 2) k++; }
   return k >= d.i ? k + 1 : k;   // index in the current list, before the dragged clip is taken out
 }
+function startMove(i, x) {
+  V.sel = i; V.selJoin = -1;
+  const b = boxes().find(b => b.i === i);
+  tl.drag = { kind: "move", i, x0: x, x, grab: x - xOf(b.t0), moved: false };
+}
+// With a finger, a swipe scrolls the timeline and a tap selects or seeks, so nothing moves by
+// accident: hold a clip to drag it somewhere else, and pinch to zoom. Edges, captions and
+// transitions work as with a mouse.
 tl.cv.addEventListener("pointerdown", e => {
   if (!V.clips.length || V.exporting || e.button !== 0) return;
-  const x = e.offsetX, y = e.offsetY, h = hit(x, y);
+  const x = e.offsetX, y = e.offsetY, touch = e.pointerType === "touch";
   tl.cv.setPointerCapture(e.pointerId);
+  if (touch) {
+    tl.fingers.set(e.pointerId, x);
+    if (tl.fingers.size === 2 && (!tl.drag || tl.drag.kind === "pan")) {
+      clearTimeout(tl.hold);
+      const [a, b] = [...tl.fingers.values()];
+      tl.drag = { kind: "pinch", d0: Math.max(20, Math.abs(a - b)), z0: V.zoom, t: tOf((a + b) / 2) };
+      return;
+    }
+    if (tl.fingers.size > 1) return;
+  }
+  const h = hit(x, y);
   V.selCap = h && h.cap ? h.cap.cap.id : null;
   if (h && h.cap) {
     V.sel = -1; V.selJoin = -1;
@@ -1628,10 +1653,17 @@ tl.cv.addEventListener("pointerdown", e => {
     const c = V.clips[h.i];
     tl.drag = { kind: "trim", i: h.i, edge: h.edge, x0: x, orig: { in: c.in, out: c.out }, before: snap(), pps: pps() };
     V.sel = h.i; V.selJoin = -1;
+  } else if (touch) {
+    tl.drag = { kind: "pan", x0: x, sl: tl.box.scrollLeft, moved: false, h };
+    if (h) tl.hold = setTimeout(() => {
+      const d = tl.drag;
+      if (!d || d.kind !== "pan" || d.moved) return;
+      vPause(); startMove(h.i, x); tl.drag.moved = true;
+      if (navigator.vibrate) navigator.vibrate(15);
+      updateUi();
+    }, 450);
   } else if (h) {
-    V.sel = h.i; V.selJoin = -1;
-    const b = boxes().find(b => b.i === h.i);
-    tl.drag = { kind: "move", i: h.i, x0: x, x, grab: x - xOf(b.t0), moved: false };
+    startMove(h.i, x);
     vSeek(tOf(x));
   } else {
     tl.drag = { kind: "scrub" };
@@ -1641,6 +1673,17 @@ tl.cv.addEventListener("pointerdown", e => {
 });
 tl.cv.addEventListener("pointermove", e => {
   const x = e.offsetX, d = tl.drag;
+  if (tl.fingers.has(e.pointerId)) tl.fingers.set(e.pointerId, x);
+  if (d && d.kind === "pinch") {
+    const [a, b] = [...tl.fingers.values()];
+    if (b != null) setZoom(d.z0 * Math.max(20, Math.abs(a - b)) / d.d0, d.t, (a + b) / 2);
+    return;
+  }
+  if (d && d.kind === "pan") {
+    if (!d.moved && Math.abs(x - d.x0) > 8) { d.moved = true; clearTimeout(tl.hold); }
+    if (d.moved) tl.box.scrollLeft = d.sl - (x - d.x0);
+    return;
+  }
   if (!d) {
     const h = V.clips.length && !V.exporting ? hit(x, e.offsetY) : null;
     tl.cv.style.cursor = h ? (h.join != null ? "pointer" : h.edge ? "ew-resize" : "grab") : "pointer";
@@ -1673,10 +1716,17 @@ tl.cv.addEventListener("pointermove", e => {
   V.T = d.edge === "l" ? it.start + (it.inT ? it.inT.ov : 0) : it.end - 0.001;
   sizeTimeline(); vtick(); updateUi();
 });
-function endDrag() {
+function endDrag(e) {
+  if (e) tl.fingers.delete(e.pointerId);
+  clearTimeout(tl.hold);
   const d = tl.drag; tl.drag = null;
-  if (!d) return;
+  if (!d || d.kind === "pinch") return;
   tl.cv.style.cursor = "";
+  if (d.kind === "pan") {   // a tap: select the clip under the finger and go there
+    if (!d.moved) { if (d.h) { V.sel = d.h.i; V.selJoin = -1; } vSeek(tOf(d.x0)); }
+    updateUi();
+    return;
+  }
   sizeTimeline();
   if (d.kind === "cap") {
     if (d.moved) { renderCapList(); focusCapRow(d.cap.id, false); vStatus("Caption timing changed."); vSave(); }
@@ -2450,11 +2500,28 @@ function syncForms() {
 
 /* ---------- UI ---------- */
 function vStatus(msg, err) { const s = $("#vStatus"); s.textContent = msg; s.classList.toggle("err", !!err); }
+let curTab = "clips";
 function showTab(name) {
+  curTab = name;
   document.querySelectorAll("#vTabs [data-tab]").forEach(b => b.setAttribute("aria-pressed", b.dataset.tab === name));
   document.querySelectorAll(".vtab").forEach(p => (p.hidden = p.dataset.panel !== name));
+  $("#vExportPanel").classList.toggle("on", name === "export");   // on a phone Export opens in the tool sheet
+  setSheet(true);
   updateUi();
 }
+// The phone editor's tool sheet can fold away to give the preview more room.
+function setSheet(open) { document.body.classList.toggle("vsheet-closed", !open); }
+const phoneMq = matchMedia("(max-width: 939px)");
+// On a phone the editor fills the screen, so the preview and timeline never scroll away.
+function setFull() {
+  const on = state.mode === "video" && phoneMq.matches;
+  document.body.classList.toggle("vfull", on);
+  if (!on && curTab === "export") showTab("clips");   // a laptop shows Export beside the tools
+}
+phoneMq.addEventListener("change", () => {
+  setFull();
+  if (state.mode === "video") requestAnimationFrame(() => { sizeTimeline(); sizePreview(); vtick(); });
+});
 function updateUi() {
   const has = V.clips.length > 0, busy = V.exporting;
   $("#vPlay").disabled = !has || busy;
@@ -2532,7 +2599,7 @@ function updateUi() {
 let vRaf = 0;
 function vLoop() {
   vtick();
-  if (V.playing) {   // keep the playhead in view
+  if (V.playing && !(tl.drag && tl.drag.kind === "pan")) {   // keep the playhead in view
     const x = xOf(V.T), w = tl.box.clientWidth;
     if (x > w - 40 || x < 0) tl.box.scrollLeft += x - 60;
   }
@@ -2543,6 +2610,7 @@ function vLoop() {
 // Called by setMode in app.js.
 function videoShown(on) {
   cancelAnimationFrame(vRaf);
+  setFull();
   if (!on) { vPause(); return; }
   readColors();
   requestAnimationFrame(() => { sizeTimeline(); sizePreview(); vtick(); updateUi(); vLoop(); });
@@ -2559,7 +2627,16 @@ $("#vBack").addEventListener("click", () => stepFrames(-1));
 $("#vFwd").addEventListener("click", () => stepFrames(1));
 $("#vExport").addEventListener("click", vExport);
 $("#vZoom").addEventListener("input", e => setZoom(Math.pow(80, e.target.value / 100)));
-$("#vTabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) showTab(b.dataset.tab); });
+$("#vTabs").addEventListener("click", e => {
+  const b = e.target.closest("[data-tab]");
+  if (!b) return;
+  // on a phone, tapping the open tab again folds the sheet away
+  if (document.body.classList.contains("vfull") && b.dataset.tab === curTab) setSheet(document.body.classList.contains("vsheet-closed"));
+  else showTab(b.dataset.tab);
+});
+$("#vSheetX").addEventListener("click", () => setSheet(false));
+$("#vTopExport").addEventListener("click", () => showTab("export"));
+$("#vHome").addEventListener("click", () => { setMode("build"); scrollTo(0, 0); });
 // transitions
 function transFromForm() { const type = $("#vTransType").value; return { type, dur: +$("#vTransDur").value }; }
 $("#vTransType").addEventListener("change", () => { if (V.selJoin >= 1) setTrans(V.selJoin, transFromForm()); });

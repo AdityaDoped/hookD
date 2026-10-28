@@ -313,6 +313,36 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .vtl { overflow-x: auto; overflow-y: hidden; background: var(--sunk); border-radius: 12px; }
 .vtl-inner { height: 132px; }
 .vtl canvas { position: sticky; left: 0; display: block; touch-action: none; }
+/* On a phone the editor fills the screen like an app: the preview and timeline stay put
+   and only the tool sheet scrolls. video.js adds body.vfull. */
+.vtop, .vsheet-x { display: none; }
+@media (max-width: 939px) {
+  body.vfull { overflow: hidden; }
+  body.vfull #videoView { position: fixed; inset: 0; z-index: 8; display: grid; background: var(--bg);
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto auto auto auto; grid-template-areas: "top" "stage" "tl" "status" "sheet" "tabs";
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+  body.vfull .ved, body.vfull .vtools, body.vfull #vToolsPanel { display: contents; }
+  body.vfull .vtop { grid-area: top; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; }
+  body.vfull .vtop .btn { padding-block: 8px; }
+  body.vfull .vtop .btn.quiet { padding-inline: 4px 10px; gap: 2px; color: var(--ink); }
+  body.vfull .vstage { grid-area: stage; min-height: 0; overflow: hidden; align-content: center; justify-items: center; gap: 4px; }
+  body.vfull .vprev { border-radius: 0; }
+  body.vfull .vtransport { width: 100%; flex-wrap: nowrap; padding-inline: 12px; }
+  body.vfull .vtl-wrap { grid-area: tl; margin: 0; padding: 4px 8px 6px; }
+  body.vfull .vtl-head, body.vfull .vtl-wrap .hint { display: none; }
+  body.vfull #vStatus { grid-area: status; margin: 0; padding: 0 16px 6px; font-size: 12.5px; }
+  body.vfull #vStatus:empty { display: none; }
+  body.vfull .vtab, body.vfull #vExportPanel { grid-area: sheet; height: clamp(150px, 30dvh, 320px); overflow-y: auto; overscroll-behavior: contain;
+    align-content: start; padding: 14px 52px 14px 16px; margin: 0; border: 0; border-top: 1px solid var(--line); border-radius: 18px 18px 0 0; background: var(--surface); }
+  body.vfull #vExportPanel:not(.on), body.vfull.vsheet-closed .vtab, body.vfull.vsheet-closed #vExportPanel { display: none; }
+  body.vfull .vsheet-x { grid-area: sheet; display: grid; justify-self: end; align-self: start; margin: 8px 8px 0 0; z-index: 1; }
+  body.vfull.vsheet-closed .vsheet-x { display: none; }
+  body.vfull #vTabs { grid-area: tabs; display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 2px; padding: 6px 6px 4px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: var(--surface); }
+  body.vfull #vTabs::-webkit-scrollbar { display: none; }
+  body.vfull #vTabs button { flex: 1 0 62px; flex-direction: column; gap: 3px; padding: 6px 2px; font-size: 11.5px; border-radius: 10px; }
+  body.vfull #vTabs button svg { width: 20px; height: 20px; }
+  body.vfull .toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 76px); }
+}
 .foot { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .foot p { margin: 4px 0; }
 .foot a { color: inherit; text-underline-offset: 2px; }
@@ -569,6 +599,10 @@ img { max-width: 100%; }
 
   <!-- VIDEO -->
   <section id="videoView" hidden>
+    <div class="vtop">
+      <button type="button" class="btn quiet" id="vHome" aria-label="Back to all modes"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Hookd</button>
+      <button type="button" class="btn primary" id="vTopExport">Export</button>
+    </div>
     <div class="ved">
       <aside class="vtools">
         <div class="vpanel vtools-main" id="vToolsPanel">
@@ -583,6 +617,7 @@ img { max-width: 100%; }
             <button type="button" data-tab="shape" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M3 8v8M21 8v8"/></svg>Shape</button>
             <button type="button" data-tab="enh" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg>Enhance</button>
           </div>
+          <button type="button" class="icon-btn vsheet-x" id="vSheetX" aria-label="Hide the tools"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
 
           <div class="vtab" data-panel="clips">
             <button type="button" class="btn primary" id="vAdd">Add videos</button>
@@ -813,7 +848,7 @@ img { max-width: 100%; }
             <p class="vhelp">Square and Portrait fill more of the screen in phone feeds. Screen recordings look best Wide.</p>
           </div>
         </div>
-        <div class="vpanel">
+        <div class="vpanel" id="vExportPanel">
           <h2>Export</h2>
           <label class="label" for="vName">File name</label>
           <input id="vName" class="vname" placeholder="my-video" autocomplete="off">
