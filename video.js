@@ -1374,8 +1374,8 @@ function vPlay() {
   if (!V.clips.length || V.exporting) return;
   const P = vplan();
   if (V.T >= P.total - 0.02) V.T = 0;
-  V.playing = true;
-  soundStart(P, V.T);
+  V.playing = true; V.waitFrom = performance.now();   // the sound starts once the pictures are ready (see vtick)
+  soundStop(); audio();   // phones only let sound start from a tap, so it's woken here
   vtick(); updateUi();
 }
 function vPause() {
@@ -1429,7 +1429,7 @@ function soundStop() {
   pa.out.disconnect(); pa = null;
 }
 // Restart the sound from here after its settings change mid-play.
-function soundRefresh() { if (V.playing) { V.T = nowT(); soundStart(vplan(), V.T); } }
+function soundRefresh() { if (V.playing && pa) { V.T = nowT(); soundStart(vplan(), V.T); } }
 function stepFrames(n) {
   if (!V.clips.length) return;
   const L = locate(V.T), c = V.clips[Math.max(0, L.i)];
@@ -1467,11 +1467,12 @@ function syncPlayers(P, T) {
     const busy = e.seeking && performance.now() - e.seekAt < 1500;
     if (!e.seeking && e.seekAt) { e.seekLag = Math.min(1, (performance.now() - e.seekAt) / 1000); e.seekAt = 0; }
     const drift = e.currentTime - w.t, off = Math.abs(drift);
-    if (w.on && V.playing) {
-      // a player takes a moment to get going, so it starts ahead by about as long as a seek takes
+    if (w.on && V.playing && pa) {   // before the sound starts, the picture waits on the right frame (below)
+      // a player that's behind takes a moment to get going, so it starts ahead by about as long as
+      // a seek takes; one already in place (a reopened pause, the next clip) just plays
       const lead = Math.max(0.12, e.seekLag || 0);
       if (busy) setRate(e, 1);
-      else if (e.paused || off > 0.5) { seekPlayer(e, Math.min(c.out, w.t + lead)); setRate(e, 1); }
+      else if (off > 0.5 || (e.paused && off > 0.1)) { seekPlayer(e, Math.min(c.out, w.t + lead)); setRate(e, 1); }
       // ease back into step with the sound in coarse steps, leaving a small drift alone: phone
       // players stutter when the speed changes every frame
       else setRate(e, off < 0.04 ? 1 : clamp(Math.round((1 - drift * 3) * 20) / 20, 0.8, 1.25));
@@ -1486,6 +1487,11 @@ function syncPlayers(P, T) {
     }
   }
 }
+function pictureReady(it) {
+  if (it.c.src.photo) return !!photoPic(it.c.src);
+  const e = pv.map.get(it.c.id);
+  return !!e && !e.seeking && e.readyState >= 3;
+}
 function vtick() {
   const P = vplan();
   if (V.playing) {
@@ -1495,8 +1501,14 @@ function vtick() {
   $("#vEmpty").hidden = V.clips.length > 0;
   if (!V.clips.length) { const g = pv.cv.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, pv.cv.width, pv.cv.height); return; }
   syncPlayers(P, V.T);
-  // draw only when every picture on screen is ready, so seeking never flashes black
   const st = layersAt(P, V.T), imgs = new Map();
+  // the sound waits until the pictures are on the right frame, so playing starts in step instead
+  // of the picture freezing while it catches up; a slow player holds it up for 1.5 s at most
+  if (V.playing && !pa && (performance.now() - V.waitFrom > 1500 || st.layers.every(L => L.it.kind !== "clip" || pictureReady(L.it)))) {
+    soundStart(P, V.T);
+    syncPlayers(P, V.T);
+  }
+  // draw only when every picture on screen is ready, so seeking never flashes black
   st.cap = capAt(P, V.T); st.t = V.T; st.P = P;
   markActiveCap(st.cap);
   // the next photo starts decoding before it's needed
