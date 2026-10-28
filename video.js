@@ -1468,10 +1468,14 @@ function syncPlayers(P, T) {
     const busy = e.seeking && performance.now() - e.seekAt < 1500;
     if (!e.seeking && e.seekAt) { e.seekLag = Math.min(1, (performance.now() - e.seekAt) / 1000); e.seekAt = 0; }
     if (w.on && V.playing && !pa) {
-      // waiting to start: the player backs up a little and runs up to the right frame unseen, so
-      // it's already playing smoothly when the sound comes in (see vtick)
-      if (e.runTo !== w.t) { if (!e.paused) e.pause(); setRate(e, 1); seekPlayer(e, Math.max(c.in, w.t - RUNUP)); e.runTo = w.t; }
-      else if (!busy && e.paused) e.play().catch(() => {});
+      // waiting to start: the player gets onto the frame and plays, and the sound joins in on the
+      // first frame it shows (see vtick). One seek at a time, so quick taps don't pile up.
+      if (busy) continue;
+      if (e.runTo !== w.t) { if (!e.paused) e.pause(); setRate(e, 1); e.shown = false; seekPlayer(e, w.t); e.runTo = w.t; }
+      else if (e.paused) {
+        e.play().catch(() => {});
+        if (e.requestVideoFrameCallback) e.requestVideoFrameCallback(() => (e.shown = true));
+      }
       continue;
     }
     const drift = e.currentTime - w.t, off = Math.abs(drift);
@@ -1495,12 +1499,12 @@ function syncPlayers(P, T) {
     }
   }
 }
-const RUNUP = 0.5;       // seconds a player runs before the moment playing starts from
 const WAIT_MAX = 3000;   // the longest playing waits for the pictures, in ms
+// A player is ready once it's playing from the right frame and has shown one.
 function pictureReady(it) {
   if (it.c.src.photo) return !!photoPic(it.c.src);
   const e = pv.map.get(it.c.id);
-  return !!e && e.runTo != null && !e.seeking && !e.paused && e.currentTime >= e.runTo - 0.03;
+  return !!e && e.runTo != null && !e.seeking && !e.paused && (e.shown || e.currentTime > e.runTo + 0.03);
 }
 function vtick() {
   const P = vplan();
@@ -1512,16 +1516,19 @@ function vtick() {
   if (!V.clips.length) { const g = pv.cv.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, pv.cv.width, pv.cv.height); return; }
   syncPlayers(P, V.T);
   const st = layersAt(P, V.T), imgs = new Map();
-  // the sound waits until the players have run up to the right frame, so playing starts smoothly
-  // and in step; a slow player holds it up for WAIT_MAX at most
+  // the sound waits for the pictures, then starts where the picture already is (the sound can
+  // start anywhere at once, a phone's video can't), so playing starts smoothly and in step; a slow
+  // player holds it up for WAIT_MAX at most
   const waited = performance.now() - V.waitFrom;
   if (V.playing && !pa && (waited > WAIT_MAX || st.layers.every(L => L.it.kind !== "clip" || pictureReady(L.it)))) {
+    const lead = st.layers.map(L => L.it.kind === "clip" && pv.map.get(L.it.c.id)).find(e => e && e.runTo != null && !e.paused);
+    // soundStart begins 0.1 s from now, by when the picture has moved on that much more
+    if (lead) V.T = clamp(V.T + Math.max(0, lead.currentTime - lead.runTo) + 0.1, 0, P.total);
     els.forEach(e => (e.runTo = null));
     soundStart(P, V.T);
-    syncPlayers(P, V.T);
   }
   pv.box.classList.toggle("vwait", V.playing && !pa && waited > 250);
-  if (V.playing && !pa) return;   // the picture holds still while the players run up
+  if (V.playing && !pa) return;   // the picture holds still until it's playing from the right frame
   // draw only when every picture on screen is ready, so seeking never flashes black
   st.cap = capAt(P, V.T); st.t = V.T; st.P = P;
   markActiveCap(st.cap);
@@ -1848,7 +1855,8 @@ tl.cv.addEventListener("pointerdown", e => {
     if (h) tl.hold = setTimeout(() => {
       const d = tl.drag;
       if (!d || d.kind !== "pan" || d.moved) return;
-      vPause(); startMove(h.i, x); tl.drag.moved = true;
+      const was = V.playing;
+      vPause(); startMove(h.i, x); tl.drag.moved = true; tl.drag.resume = was;   // playing picks up again on release
       if (navigator.vibrate) navigator.vibrate(15);
       updateUi();
     }, 450);
@@ -1918,6 +1926,7 @@ function endDrag(e) {
   if (!d || d.kind === "pinch") return;
   tl.cv.style.cursor = "";
   if (d.kind === "scrub") { if (d.resume) vPlay(); updateUi(); return; }
+  if (d.resume) queueMicrotask(vPlay);   // after the clip has been put down
   if (d.kind === "pan") {   // a tap: select the clip under the finger and go there
     if (!d.moved) { if (d.h) { V.sel = d.h.i; V.selJoin = -1; } vSeek(d.onMusic ? nearestBeat(tOf(d.x0)) : tOf(d.x0)); }
     updateUi();
