@@ -14,7 +14,8 @@ const V = {
   cover: null,   // { name, bmp }: the picture on a cover title
   banner: { on: false, text: "", dur: 5 },   // dur 0 = the whole video
   shape: "original", fit: "fit",
-  music: null,   // { name, buffer, vol, duck }
+  music: null,   // { name, buffer, vol, duck, from (where in the song it starts), beat ({ bpm, period, phase }) }
+  beatEvery: 2, muteClips: false,   // Cut to the beat: beats per picture, and only the song plays
   // captions live in source time ({ id, src, s, e, text }), so cuts and moves carry them along
   caps: [], selCap: null, capLook: { style: "bar", size: "m", pos: "bottom", burn: true },
   // chapter headings, also in source time: { id, src, s, text, sub, icon, card, hold }
@@ -448,7 +449,7 @@ function duckCurve(P) {
   const key = V.version + ":" + (V.music && V.music.duck);
   if (duckCache.key === key) return duckCache.curve;
   const n = Math.ceil(P.total * DUCK_RATE) + 1, talk = new Uint8Array(n), curve = new Float32Array(n).fill(1);
-  if (V.music && V.music.duck) {
+  if (V.music && V.music.duck && !V.muteClips) {
     for (const it of P.items) {
       if (it.kind !== "clip" || !it.c.src.levels) continue;
       const s = it.c.src;
@@ -470,8 +471,64 @@ function duckCurve(P) {
 function musicGain(P, t) {
   if (!V.music) return 0;
   const c = duckCurve(P), d = c[clamp(Math.round(t * DUCK_RATE), 0, c.length - 1)];
-  const fadeIn = Math.min(1, t / 0.5), fadeOut = P.total > 4 ? Math.min(1, (P.total - t) / 2) : 1;
+  // short fade in, so a song started on a beat still hits on the first frame
+  const fadeIn = Math.min(1, t / 0.15), fadeOut = P.total > 4 ? Math.min(1, (P.total - t) / 2) : 1;
   return V.music.vol * d * Math.max(0, Math.min(fadeIn, fadeOut));
+}
+
+/* ---------- Cut to the beat ----------
+   The song's beats (a steady grid from detectBeats in app.js), moved to timeline
+   time by where the song starts. "Cut to the beat" gives every clip the same
+   number of beats, so each cut lands on one. */
+const BEAT_PACES = [1, 2, 4, 8];
+// beat times on the timeline, up to time `to`
+function beatsOn(to) {
+  const m = V.music;
+  if (!m || !m.beat) return [];
+  const p = m.beat.period, out = [];
+  for (let t = m.beat.phase - m.from + Math.ceil((m.from - m.beat.phase) / p - 1e-6) * p; t <= to + 1e-6; t += p) out.push(t);
+  return out;
+}
+// the song time of the beat nearest to t (for where the song starts)
+function nearestSongBeat(t) {
+  const b = V.music.beat;
+  return Math.max(0, b.phase + Math.round((t - b.phase) / b.period) * b.period);
+}
+function nearestBeat(t) {
+  const m = V.music;
+  if (!m || !m.beat) return t;
+  const p = m.beat.period, off = m.beat.phase - m.from;
+  return off + Math.round((t - off) / p) * p;
+}
+function cutToBeat() {
+  const m = V.music;
+  if (!m || !m.beat || !V.clips.length || V.exporting) return;
+  const before = snap(), P = vplan(), p = m.beat.period, N = V.beatEvery;
+  const first = beatsOn(p)[0] ?? 0;   // the first beat at or after the start
+  // pieces overlapping in a crossfade would pull the cuts off the beat, so those become cuts
+  let unfaded = 0, short = 0;
+  V.clips = V.clips.map((c, i) => {
+    if (i && c.trans && OVERLAP[c.trans.type]) { unfaded++; return { ...c, trans: null }; }
+    return { ...c };
+  });
+  let t = P.items[0] && P.items[0].kind === "title" ? P.items[0].len : 0;
+  for (const c of V.clips) {
+    const room = c.src.end - c.in;   // a photo's end is PHOTO_MAX
+    // the next cut N beats on, counted from the first beat
+    let end = first + Math.ceil((t + N * p * 0.5 - first) / (N * p)) * N * p;
+    if (end - t > room + 1e-6) {
+      // too short to fill N beats: end on the last beat it reaches
+      end = first + Math.floor((t + room - first) / p + 1e-6) * p;
+      short++;
+      if (end - t < MIN_CLIP) { t += clipLen(c); continue; }
+    }
+    c.out = c.in + (end - t);
+    t = end;
+  }
+  commit(before);
+  vStatus(`Cut to the beat: a new picture every ${N > 1 ? N + " beats" : "beat"}.` +
+    (short ? ` ${short} video${short > 1 ? "s were" : " was"} too short, so ${short > 1 ? "they end" : "it ends"} on an earlier beat.` : "") +
+    (unfaded ? ` Crossfades and sliding panels became straight cuts so they stay on the beat.` : ""));
 }
 
 /* ---------- Captions ---------- */
@@ -1341,7 +1398,7 @@ function soundStart(P, T) {
   const c = audio(), t0 = c.currentTime + 0.1, out = c.createGain(), nodes = [];
   out.connect(c.destination);
   for (const it of P.items) {
-    if (it.kind !== "clip" || it.end <= T) continue;
+    if (it.kind !== "clip" || it.end <= T || V.muteClips) continue;
     const s = it.c.src, buf = voiceBuffer(s);
     if (!buf) continue;
     let from = Math.max(T, it.start), off = it.c.in + (from - it.start) - s.aOff;
@@ -1357,7 +1414,7 @@ function soundStart(P, T) {
     const src = c.createBufferSource(), g = c.createGain();
     src.buffer = V.music.buffer; src.loop = true; src.connect(g).connect(out);
     g.gain.setValueCurveAtTime(curveOf(t => musicGain(P, t), T, P.total), t0, P.total - T);
-    src.start(t0, T % src.buffer.duration);
+    src.start(t0, (V.music.from + T) % src.buffer.duration);
     nodes.push(src);
   }
   pa = { nodes, out, t0, T };
@@ -1447,8 +1504,8 @@ function vtick() {
 
 /* ---------- Timeline drawing ---------- */
 // lane sizes: roomy on a laptop, compact on a phone so the preview keeps its space
-const TL_ROOMY = { h: 182, clipY: 30, clipH: 84, capY: 119, capH: 24, musY: 149, musH: 26 };
-const TL_PHONE = { h: 136, clipY: 24, clipH: 60, capY: 88, capH: 20, musY: 112, musH: 20 };
+const TL_ROOMY = { h: 186, clipY: 30, clipH: 84, capY: 119, capH: 24, musY: 149, musH: 26 };
+const TL_PHONE = { h: 140, clipY: 24, clipH: 60, capY: 88, capH: 20, musY: 112, musH: 20 };   // h leaves room for the beat dots
 const tl = { box: $("#vtl"), inner: $("#vtlInner"), cv: $("#vtlCanvas"), pad: 16, ...TL_ROOMY, drag: null, col: null, fingers: new Map(), hold: 0 };
 const fitPps = () => (tl.box.clientWidth - 2 * tl.pad) / Math.max(vtotal(), 1);
 // the scale holds still during a drag, so a trimmed edge stays under the pointer
@@ -1641,8 +1698,17 @@ function drawMusic(g, P, W) {
     g.fillRect(px, y + h - 4 - hh, 2, hh);
   }
   g.globalAlpha = 1; g.fillStyle = C.ink; g.font = `600 11.5px ${C.body || "sans-serif"}`; g.textBaseline = "middle";
-  g.fillText(`♪ ${V.music.name}${V.music.duck ? " · lowered while you talk" : ""}`, Math.max(x0, 0) + 8, y + h / 2, Math.max(0, x1 - x0 - 16));
+  const from = V.music.from >= 0.05 ? ` · from ${fmt(V.music.from, 1)}` : "";
+  g.fillText(`♪ ${V.music.name}${from}${V.music.duck && !V.muteClips ? " · lowered while you talk" : ""}`, Math.max(x0, 0) + 8, y + h / 2, Math.max(0, x1 - x0 - 16));
   g.restore();
+  // the beats: a big dot where a cut lands at the chosen pace, small ones between when there's room
+  const beats = beatsOn(P.total), every = V.beatEvery, roomy = V.music.beat.period * pps() >= 6;
+  g.fillStyle = C.gold;
+  beats.forEach((t, i) => {
+    const big = i % every === 0, x = xOf(t);
+    if ((!big && !roomy) || x < -4 || x > W + 4) return;
+    g.beginPath(); g.arc(x, y + h + 3, big ? 3 : 1.6, 0, 2 * Math.PI); g.fill();
+  });
 }
 
 /* ---------- Timeline pointer: select, scrub, trim, reorder, transitions ---------- */
@@ -1731,7 +1797,7 @@ tl.cv.addEventListener("pointerdown", e => {
     tl.drag = { kind: "trim", i: h.i, edge: h.edge, x0: x, orig: { in: c.in, out: c.out }, before: snap(), pps: pps() };
     V.sel = h.i; V.selJoin = -1;
   } else if (touch) {
-    tl.drag = { kind: "pan", x0: x, sl: tl.box.scrollLeft, moved: false, h };
+    tl.drag = { kind: "pan", x0: x, sl: tl.box.scrollLeft, moved: false, h, onMusic: y >= tl.musY };
     if (h) tl.hold = setTimeout(() => {
       const d = tl.drag;
       if (!d || d.kind !== "pan" || d.moved) return;
@@ -1744,7 +1810,7 @@ tl.cv.addEventListener("pointerdown", e => {
     vSeek(tOf(x));
   } else {
     tl.drag = { kind: "scrub" };
-    vSeek(tOf(x));
+    vSeek(y >= tl.musY ? nearestBeat(tOf(x)) : tOf(x));   // a click on the music lane lands on a beat
   }
   updateUi();
 });
@@ -1787,7 +1853,12 @@ tl.cv.addEventListener("pointermove", e => {
   // trim: the preview shows the frame at the edge being dragged
   const c = V.clips[d.i], dt = (x - d.x0) / pps();
   if (d.edge === "l") c.in = frameSnap(c.src, clamp(d.orig.in + dt, c.src.start, c.out - MIN_CLIP));
-  else c.out = frameSnap(c.src, clamp(d.orig.out + dt, c.in + MIN_CLIP, c.src.end));
+  else {
+    c.out = frameSnap(c.src, clamp(d.orig.out + dt, c.in + MIN_CLIP, c.src.end));
+    // with music, the end clicks onto a beat when it's close to one
+    const st = clipItem(vplan(), d.i).start, te = st + clipLen(c), nb = nearestBeat(te);
+    if (nb !== te && Math.abs(nb - te) * pps() < 10 && c.in + (nb - st) <= c.src.end && nb - st >= MIN_CLIP) c.out = c.in + (nb - st);
+  }
   V.version++;
   const it = clipItem(vplan(), d.i);
   V.T = d.edge === "l" ? it.start + (it.inT ? it.inT.ov : 0) : it.end - 0.001;
@@ -1800,7 +1871,7 @@ function endDrag(e) {
   if (!d || d.kind === "pinch") return;
   tl.cv.style.cursor = "";
   if (d.kind === "pan") {   // a tap: select the clip under the finger and go there
-    if (!d.moved) { if (d.h) { V.sel = d.h.i; V.selJoin = -1; } vSeek(tOf(d.x0)); }
+    if (!d.moved) { if (d.h) { V.sel = d.h.i; V.selJoin = -1; } vSeek(d.onMusic ? nearestBeat(tOf(d.x0)) : tOf(d.x0)); }
     updateUi();
     return;
   }
@@ -1893,7 +1964,7 @@ class ClipReader {
 function audioBlock(P, sr, a, n) {
   const L = new Float32Array(n), R = new Float32Array(n), STEP = 16;
   for (const it of P.items) {
-    if (it.kind !== "clip" || !it.c.src.audio) continue;
+    if (it.kind !== "clip" || !it.c.src.audio || V.muteClips) continue;
     const s = it.c.src, cS = Math.round(it.start * sr), cE = Math.round(it.end * sr);
     const j0 = Math.max(a, cS), j1 = Math.min(a + n, cE);
     if (j1 <= j0) continue;
@@ -1908,10 +1979,11 @@ function audioBlock(P, sr, a, n) {
   }
   if (V.music) {
     const mb = V.music.buffer, ml = mb.getChannelData(0), mr = mb.numberOfChannels > 1 ? mb.getChannelData(1) : ml, len = ml.length;
+    const from = Math.round(V.music.from * sr);
     let gain = 0;
     for (let j = a; j < a + n; j++) {
       if ((j - a) % STEP === 0) gain = musicGain(P, (j + STEP / 2) / sr);
-      const k = j % len;
+      const k = (j + from) % len;
       L[j - a] += ml[k] * gain; R[j - a] += mr[k] * gain;
     }
   }
@@ -2080,9 +2152,9 @@ async function addMusic(file) {
   vStatus(`Reading ${file.name}…`);
   try {
     const buffer = await decodeFile(audio(), file);
-    V.music = { name: cleanName(file.name), buffer, vol: +$("#vMusicVol").value / 100, duck: $("#vDuck").checked };
+    V.music = { name: cleanName(file.name), buffer, vol: +$("#vMusicVol").value / 100, duck: $("#vDuck").checked, from: 0, beat: detectBeats(buffer) };
     storeFile("music", file);
-    vStatus(`Added music: ${V.music.name}.`);
+    vStatus(`Added music: ${V.music.name}, about ${Math.round(V.music.beat.bpm)} beats a minute.`);
   } catch (e) {
     vStatus(`Couldn't read ${file.name}${e && e.why ? ": " + e.why : ". Try an MP3 or M4A file"}.`, true);
   }
@@ -2142,7 +2214,8 @@ function projectData() {
     caps: V.caps.map(k => ({ id: k.id, src: k.src.id, s: k.s, e: k.e, text: k.text })),
     chapters: V.chapters.map(c => ({ ...c, src: c.src.id })),
     title: V.title, banner: V.banner, look: V.look, out: V.out, shape: V.shape, fit: V.fit, capLook: V.capLook, enh: V.enh,
-    music: V.music ? { name: V.music.name, vol: V.music.vol, duck: V.music.duck } : null,
+    music: V.music ? { name: V.music.name, vol: V.music.vol, duck: V.music.duck, from: V.music.from, beat: V.music.beat } : null,
+    beatEvery: V.beatEvery, muteClips: V.muteClips,
     cover: V.cover ? { name: V.cover.name } : null,
   };
 }
@@ -2180,12 +2253,15 @@ async function vRestore() {
     try { const f = await vstore.getFile("cover"); V.cover = { name: p.cover.name, bmp: await createImageBitmap(f) }; } catch (e) { failed++; }
   }
   V.shape = p.shape || V.shape; V.fit = p.fit || V.fit;
+  if (BEAT_PACES.includes(p.beatEvery)) V.beatEvery = p.beatEvery;
+  V.muteClips = !!p.muteClips;
   V.nextId = Math.max(p.nextId || 1, ...V.sources.map(s => s.id + 1), ...V.clips.map(c => c.id + 1), ...V.caps.map(k => k.id + 1), ...V.chapters.map(c => c.id + 1));
   if (p.name) $("#vName").value = p.name;
   if (p.music) {
     try {
       const f = await vstore.getFile("music");
-      V.music = { name: p.music.name, buffer: await decodeFile(audio(), f), vol: p.music.vol, duck: p.music.duck };
+      const buffer = await decodeFile(audio(), f);
+      V.music = { name: p.music.name, buffer, vol: p.music.vol, duck: p.music.duck, from: p.music.from || 0, beat: p.music.beat || detectBeats(buffer) };
     } catch (e) { failed++; }
   }
   syncForms();
@@ -2218,7 +2294,7 @@ async function startOver() {
   V.sources.forEach(s => { if (s.url) URL.revokeObjectURL(s.url); });
   photoCache.clear();
   // the style (colours, font, caption look, banner name) stays for the next video in the series
-  Object.assign(V, { sources: [], clips: [], caps: [], chapters: [], undo: [], redo: [], sel: -1, selJoin: -1, selCap: null, T: 0, music: null, cover: null });
+  Object.assign(V, { sources: [], clips: [], caps: [], chapters: [], undo: [], redo: [], sel: -1, selJoin: -1, selCap: null, T: 0, music: null, cover: null, muteClips: false });
   Object.assign(V.title, { on: false, text: "", dur: 3 });
   Object.assign(V.enh, { noise: 0, level: false, bright: 0, contrast: 0, sat: 0, warm: 0 });
   $("#vName").value = "";
@@ -2587,6 +2663,7 @@ function syncForms() {
 /* ---------- UI ---------- */
 function vStatus(msg, err) { const s = $("#vStatus"); s.textContent = msg; s.classList.toggle("err", !!err); }
 let curTab = "clips";
+let slip = null;   // while "Which part plays" slides: the clips before, for undo
 function showTab(name) {
   curTab = name;
   document.querySelectorAll("#vTabs [data-tab]").forEach(b => b.setAttribute("aria-pressed", b.dataset.tab === name));
@@ -2629,6 +2706,15 @@ function updateUi() {
     if (document.activeElement !== $("#vPhotoLen")) $("#vPhotoLen").value = +clipLen(ph).toFixed(2);
     document.querySelectorAll("#vMotion [data-motion]").forEach(b => b.setAttribute("aria-pressed", b.dataset.motion === (ph.motion || "")));
   }
+  // which part of the selected video plays
+  const isVid = !!ph && !ph.src.photo;
+  $("#vPartBox").hidden = !isVid;
+  if (isVid) {
+    const pt = $("#vPart"), room = ph.src.end - clipLen(ph);
+    pt.min = ph.src.start; pt.max = Math.max(ph.src.start, room).toFixed(3); pt.disabled = room - ph.src.start < 0.05 || busy;
+    if (!slip) pt.value = ph.in;
+    $("#vPartOut").textContent = `${fmt(ph.in, 1)}–${fmt(ph.out, 1)}`;
+  }
   // transitions
   const j = V.selJoin, c = V.clips[j], tr = c && c.trans;
   $("#vTransEdit").hidden = !c || j < 1;
@@ -2643,7 +2729,17 @@ function updateUi() {
   // music
   $("#vMusicSet").hidden = !V.music;
   $("#vMusicAdd").textContent = V.music ? "Change music" : "Add music";
-  if (V.music) $("#vMusicName").textContent = V.music.name;
+  if (V.music) {
+    const m = V.music, fr = $("#vMusicFrom");
+    $("#vMusicName").textContent = m.name;
+    fr.max = Math.max(0, m.buffer.duration - 1).toFixed(2);
+    if (document.activeElement !== fr) fr.value = m.from;
+    $("#vMusicFromOut").textContent = fmt(m.from, 1);
+    $("#vBeatInfo").textContent = `About ${Math.round(m.beat.bpm)} beats a minute, so ${V.beatEvery > 1 ? V.beatEvery + " beats last" : "a beat lasts"} ${(m.beat.period * V.beatEvery).toFixed(2)} s.`;
+    document.querySelectorAll("#vBeatEvery [data-every]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.every === V.beatEvery));
+    $("#vMuteClips").checked = V.muteClips;
+    $("#vBeatCut").disabled = !has || busy;
+  }
   // shape
   document.querySelectorAll("#vShapes [data-shape]").forEach(b => b.setAttribute("aria-pressed", b.dataset.shape === V.shape));
   document.querySelectorAll("#vFitSeg [data-fit]").forEach(b => b.setAttribute("aria-pressed", b.dataset.fit === V.fit));
@@ -2744,6 +2840,43 @@ $("#vMotion").addEventListener("click", e => {
   const b = e.target.closest("[data-motion]");
   if (b) editPhoto(() => ({ motion: b.dataset.motion || null }));
 });
+// slide a video clip along its source: same length, a different moment
+$("#vPart").addEventListener("input", e => {
+  const c = V.clips[V.sel];
+  if (!c || c.src.photo || V.exporting) return;
+  if (!slip) { slip = snap(); vPause(); }
+  const len = clipLen(c), s = clamp(+e.target.value, c.src.start, c.src.end - len);
+  V.clips[V.sel] = { ...c, in: s, out: s + len };
+  V.version++; vSeek(clipItem(vplan(), V.sel).start); updateUi();
+});
+$("#vPart").addEventListener("change", () => { if (!slip) return; const before = slip; slip = null; commit(before); });
+// music: where the song starts, and cutting to its beat
+$("#vMusicFrom").addEventListener("input", e => {
+  if (!V.music) return;
+  V.music.from = nearestSongBeat(+e.target.value);   // start on a beat, so the first picture lands on one
+  V.version++; updateUi(); soundRefresh();
+});
+$("#vMusicFrom").addEventListener("change", () => { if (V.music) { vSave(); vStatus(`The song now starts at ${fmt(V.music.from, 1)}.`); } });
+$("#vMusicHook").addEventListener("click", () => {
+  const m = V.music;
+  if (!m) return;
+  const h = findHook({ energy: energyEnv(m.buffer), duration: m.buffer.duration, beat: m.beat }, Math.max(15, vtotal()));
+  m.from = nearestSongBeat(h.start);
+  V.version++; vSave(); updateUi(); soundRefresh();
+  vStatus(`The song now starts at its catchiest part, ${fmt(m.from, 1)}.`);
+});
+$("#vBeatEvery").addEventListener("click", e => {
+  const b = e.target.closest("[data-every]");
+  if (!b) return;
+  V.beatEvery = +b.dataset.every; vSave(); updateUi();
+});
+$("#vMuteClips").addEventListener("change", e => {
+  V.muteClips = e.target.checked;
+  // background-music volume is too quiet when the song is all there is
+  if (V.muteClips && V.music && V.music.vol < 1) { V.music.vol = 1; $("#vMusicVol").value = 100; vStatus("Only the song plays now, at full volume."); }
+  V.version++; vSave(); soundRefresh();
+});
+$("#vBeatCut").addEventListener("click", cutToBeat);
 $("#vPhotoAll").addEventListener("click", () => {
   const c = V.clips[V.sel];
   if (!c || !c.src.photo || V.exporting) return;

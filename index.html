@@ -297,7 +297,10 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .vphoto-len { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
 .vphoto-len input { width: 5.5em; }
 #vMotion { justify-self: start; border-radius: 18px; }
-#vPhotoBox { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+#vPhotoBox, #vPartBox { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.vbeat { display: grid; gap: 8px; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
+.vbeat p { margin: 0; }
+#vBeatEvery { justify-self: start; }
 .vtab .btn { justify-self: start; }
 .vmusic { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
 .vshapes { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
@@ -450,7 +453,7 @@ img { max-width: 100%; }
         <b>Live DJ</b><span>Tap pads, switch on the beat</span></button>
       <button type="button" class="mode" id="modeVideo" aria-pressed="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="M16.5 10l5-3v10l-5-3"/></svg>
-        <b>Edit a video</b><span>Captions, cuts, music, 4K</span></button>
+        <b>Edit a video</b><span>Beat sync, photos, captions, 4K</span></button>
     </div>
     <div class="vibe" id="vibeBar">
       <span class="label">Vibe</span>
@@ -637,6 +640,11 @@ img { max-width: 100%; }
               </div>
               <button type="button" class="btn quiet" id="vPhotoAll">Use this length and movement for every photo</button>
             </div>
+            <div class="vform" id="vPartBox" hidden>
+              <label class="label" for="vPart">Which part of the video plays <output class="mono" id="vPartOut"></output></label>
+              <input type="range" id="vPart" min="0" max="1" step="0.01" value="0">
+              <small class="vhelp">Slide to pick the moment that lands on the beat. The clip keeps its length.</small>
+            </div>
             <button type="button" class="btn primary" id="vAdd">Add videos or photos</button>
             <input type="file" id="vFileIn" accept="video/mp4,video/quicktime,.mp4,.mov,.m4v,image/*" multiple hidden>
             <p class="vhelp">MP4 or MOV videos and JPG, PNG or WebP photos, or drop them anywhere on this page. They join up in order.</p>
@@ -803,6 +811,23 @@ img { max-width: 100%; }
               <label class="label" for="vMusicVol">Music volume</label>
               <input type="range" id="vMusicVol" min="0" max="100" value="25">
               <label class="check"><input type="checkbox" id="vDuck"><span>Lower the music while I talk<small>The music dips whenever someone speaks and comes back up in the pauses.</small></span></label>
+              <label class="label" for="vMusicFrom">Song starts at <output class="mono" id="vMusicFromOut">0:00.0</output></label>
+              <input type="range" id="vMusicFrom" min="0" max="1" step="0.01" value="0">
+              <button type="button" class="btn quiet" id="vMusicHook">Start at the catchiest part</button>
+              <div class="vbeat">
+                <p class="vsub">Cut to the beat</p>
+                <p class="vhelp" id="vBeatInfo"></p>
+                <span class="label">A new picture every</span>
+                <div class="seg" id="vBeatEvery" role="group" aria-label="A new picture every">
+                  <button type="button" data-every="1" aria-pressed="false">Beat</button>
+                  <button type="button" data-every="2" aria-pressed="true">2 beats</button>
+                  <button type="button" data-every="4" aria-pressed="false">4 beats</button>
+                  <button type="button" data-every="8" aria-pressed="false">8 beats</button>
+                </div>
+                <label class="check"><input type="checkbox" id="vMuteClips"><span>Mute the videos' own sound<small>Only the song plays.</small></span></label>
+                <button type="button" class="btn primary" id="vBeatCut">Cut to the beat</button>
+                <p class="vhelp">Every photo and video gets the same number of beats, in their order, so each cut lands on a beat. Tap the music lane to jump to a beat, and drag a clip's end to snap it to one. Undo puts everything back.</p>
+              </div>
             </div>
             <p class="vhelp">Plays under the whole video, repeats if it's shorter, and fades out at the end. Only use music you have the right to use.</p>
           </div>
