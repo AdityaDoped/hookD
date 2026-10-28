@@ -1376,6 +1376,7 @@ function vPlay() {
   if (V.T >= P.total - 0.02) V.T = 0;
   V.playing = true; V.waitFrom = performance.now();   // the sound starts once the pictures are ready (see vtick)
   soundStop(); audio();   // phones only let sound start from a tap, so it's woken here
+  els.forEach(e => (e.runTo = null));
   vtick(); updateUi();
 }
 function vPause() {
@@ -1466,8 +1467,15 @@ function syncPlayers(P, T) {
     // a seek that hasn't landed in 1.5 s is asked again.
     const busy = e.seeking && performance.now() - e.seekAt < 1500;
     if (!e.seeking && e.seekAt) { e.seekLag = Math.min(1, (performance.now() - e.seekAt) / 1000); e.seekAt = 0; }
+    if (w.on && V.playing && !pa) {
+      // waiting to start: the player backs up a little and runs up to the right frame unseen, so
+      // it's already playing smoothly when the sound comes in (see vtick)
+      if (e.runTo !== w.t) { if (!e.paused) e.pause(); setRate(e, 1); seekPlayer(e, Math.max(c.in, w.t - RUNUP)); e.runTo = w.t; }
+      else if (!busy && e.paused) e.play().catch(() => {});
+      continue;
+    }
     const drift = e.currentTime - w.t, off = Math.abs(drift);
-    if (w.on && V.playing && pa) {   // before the sound starts, the picture waits on the right frame (below)
+    if (w.on && V.playing) {
       // a player that's behind takes a moment to get going, so it starts ahead by about as long as
       // a seek takes; one already in place (a reopened pause, the next clip) just plays
       const lead = Math.max(0.12, e.seekLag || 0);
@@ -1487,10 +1495,12 @@ function syncPlayers(P, T) {
     }
   }
 }
+const RUNUP = 0.5;       // seconds a player runs before the moment playing starts from
+const WAIT_MAX = 3000;   // the longest playing waits for the pictures, in ms
 function pictureReady(it) {
   if (it.c.src.photo) return !!photoPic(it.c.src);
   const e = pv.map.get(it.c.id);
-  return !!e && !e.seeking && e.readyState >= 3;
+  return !!e && e.runTo != null && !e.seeking && !e.paused && e.currentTime >= e.runTo - 0.03;
 }
 function vtick() {
   const P = vplan();
@@ -1502,12 +1512,16 @@ function vtick() {
   if (!V.clips.length) { const g = pv.cv.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, pv.cv.width, pv.cv.height); return; }
   syncPlayers(P, V.T);
   const st = layersAt(P, V.T), imgs = new Map();
-  // the sound waits until the pictures are on the right frame, so playing starts in step instead
-  // of the picture freezing while it catches up; a slow player holds it up for 1.5 s at most
-  if (V.playing && !pa && (performance.now() - V.waitFrom > 1500 || st.layers.every(L => L.it.kind !== "clip" || pictureReady(L.it)))) {
+  // the sound waits until the players have run up to the right frame, so playing starts smoothly
+  // and in step; a slow player holds it up for WAIT_MAX at most
+  const waited = performance.now() - V.waitFrom;
+  if (V.playing && !pa && (waited > WAIT_MAX || st.layers.every(L => L.it.kind !== "clip" || pictureReady(L.it)))) {
+    els.forEach(e => (e.runTo = null));
     soundStart(P, V.T);
     syncPlayers(P, V.T);
   }
+  pv.box.classList.toggle("vwait", V.playing && !pa && waited > 250);
+  if (V.playing && !pa) return;   // the picture holds still while the players run up
   // draw only when every picture on screen is ready, so seeking never flashes black
   st.cap = capAt(P, V.T); st.t = V.T; st.P = P;
   markActiveCap(st.cap);

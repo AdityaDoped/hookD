@@ -245,6 +245,8 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 /* the players sit under the canvas; the preview is drawn onto the canvas */
 .vprev video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .vprev canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
+.vprev.vwait::after { content: ""; position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 3px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: vspin .8s linear infinite; }
+@keyframes vspin { to { transform: rotate(360deg); } }
 /* On a laptop the tools panel keeps one height whatever tab is open and scrolls inside,
    so switching tabs never moves the timeline below. */
 @media (min-width: 940px) {
