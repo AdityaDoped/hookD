@@ -1460,21 +1460,23 @@ function syncPlayers(P, T) {
     if (e.dataset.src !== String(c.src.id)) { e.src = c.src.url; e.dataset.src = c.src.id; }
     e.muted = true;   // the sound comes from the audio clock (see soundStart)
     // a phone can take longer than a frame to seek: asking again before it lands starts it over,
-    // so the same moment plays again and again. Let it land, and remember how long it took.
-    if (e.seeking) continue;
-    if (e.seekAt) { e.seekLag = Math.min(1, (performance.now() - e.seekAt) / 1000); e.seekAt = 0; }
+    // so the same moment plays again and again. Let it land, and remember how long it took. A
+    // reopened phone player can sit mid-seek until it's told to play, so it still gets told, and
+    // a seek that hasn't landed in 1.5 s is asked again.
+    const busy = e.seeking && performance.now() - e.seekAt < 1500;
+    if (!e.seeking && e.seekAt) { e.seekLag = Math.min(1, (performance.now() - e.seekAt) / 1000); e.seekAt = 0; }
     const drift = e.currentTime - w.t, off = Math.abs(drift);
     if (w.on && V.playing) {
       // a player takes a moment to get going, so it starts ahead by about as long as a seek takes
       const lead = Math.max(0.12, e.seekLag || 0);
-      if (e.paused) { seekPlayer(e, Math.min(c.out, w.t + lead)); e.playbackRate = 1; }
-      else if (off > 0.5) { seekPlayer(e, Math.min(c.out, w.t + lead)); e.playbackRate = 1; }
+      if (busy) e.playbackRate = 1;
+      else if (e.paused || off > 0.5) { seekPlayer(e, Math.min(c.out, w.t + lead)); e.playbackRate = 1; }
       else e.playbackRate = clamp(1 - drift * 3, 0.8, 1.25);   // ease back into step with the sound
       if (e.paused) e.play().catch(() => {});
     } else {
       if (!e.paused) e.pause();
       e.playbackRate = 1;
-      if (off > 0.02) seekPlayer(e, w.t);
+      if (off > 0.02 && !busy) seekPlayer(e, w.t);
     }
   }
 }
