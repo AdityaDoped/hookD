@@ -1347,7 +1347,7 @@ function setTrans(ci, tr) {
    per clip on screen, or parked on the next clip), and each frame is drawn onto
    a canvas with the same code the export uses. */
 const vA = $("#vA"), vB = $("#vB"), els = [vA, vB];
-const pv = { cv: $("#vCanvas"), box: $("#vPrevBox"), W: 1280, H: 720, map: new Map() };
+const pv = { cv: $("#vCanvas"), box: $("#vPrevBox"), W: 1280, H: 720, map: new Map(), draws: 0 };
 let pa = null;   // the sound now playing: { nodes, out, t0, T }
 function sizePreview() {
   const [W, H] = outSize(), stage = $(".vstage"), ar = W / H;
@@ -1550,6 +1550,7 @@ function vtick() {
   const g = pv.cv.getContext("2d"), k = pv.cv.width / pv.W;
   g.setTransform(k, 0, 0, k, 0, 0);
   compose(g, pv.W, pv.H, st, L => imgs.get(L.it));
+  pv.draws++;
   g.setTransform(1, 0, 0, 1, 0, 0);
 }
 
@@ -3064,6 +3065,51 @@ document.addEventListener("keydown", e => {
 window.addEventListener("beforeunload", e => { if (V.exporting || vStoring) { e.preventDefault(); e.returnValue = ""; } });
 $("#vName").addEventListener("input", vSave);
 $("#vNew").addEventListener("click", startOver);
+/* ---------- Debug log (?debug=1) ----------
+   Records the players and the sound clock ten times a second, plus their events, on a
+   phone where there's no console, so a problem can be copied and sent. Not shown otherwise. */
+if (/[?&]debug=1\b/.test(location.search)) {
+  const t0 = performance.now(), lines = [], ms = () => Math.round(performance.now() - t0);
+  const add = s => { lines.push(s); if (lines.length > 3000) lines.splice(0, 500); };
+  const f = (n, d = 2) => n == null || !isFinite(n) ? "-" : n.toFixed(d);
+  const box = document.createElement("div"), live = document.createElement("pre"), bar = document.createElement("div");
+  box.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:99999;background:rgba(0,0,0,.8);color:#7f7;font:10px/1.3 monospace;padding:4px;pointer-events:none";
+  live.style.cssText = "margin:0;white-space:pre-wrap";
+  bar.style.cssText = "display:flex;gap:6px;margin-top:3px;pointer-events:auto";
+  const btn = (label, fn) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = label; b.style.cssText = "font:12px sans-serif;padding:4px 10px";
+    b.addEventListener("click", fn); bar.append(b); return b;
+  };
+  const copy = btn("Copy log", async () => {
+    const text = navigator.userAgent + "\n" + lines.join("\n");
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) { const ta = document.createElement("textarea"); ta.value = text; document.body.append(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
+    copy.textContent = `Copied ${lines.length} lines`;
+  });
+  btn("Clear", () => { lines.length = 0; copy.textContent = "Copy log"; });
+  btn("Hide", () => { live.hidden = !live.hidden; });
+  box.append(live, bar); document.body.append(box);
+  const who = e => "AB"[els.indexOf(e)];
+  for (const e of els) {
+    for (const ev of ["play", "playing", "pause", "waiting", "stalled", "seeking", "seeked", "error", "emptied", "loadeddata", "canplay"])
+      e.addEventListener(ev, () => add(`${ms()} ev ${who(e)}:${ev} ct=${f(e.currentTime)} rs=${e.readyState}`));
+    const play = e.play.bind(e);
+    e.play = () => { const p = play(); p.catch(err => add(`${ms()} ev ${who(e)}:play REJECTED ${err.name}`)); return p; };
+  }
+  const wrap = (name, fn) => (...a) => { add(`${ms()} call ${name}(${a.map(x => typeof x === "number" ? f(x) : "").join(",")}) T=${f(V.T)}`); return fn(...a); };
+  vPlay = wrap("play", vPlay); vPause = wrap("pause", vPause); vSeek = wrap("seek", vSeek); soundStart = wrap("soundStart", soundStart);
+  tl.cv.addEventListener("pointerdown", e => add(`${ms()} touch down x=${e.offsetX | 0} y=${e.offsetY | 0} ${e.pointerType}`));
+  tl.cv.addEventListener("pointerup", e => add(`${ms()} touch up x=${e.offsetX | 0} drag=${tl.drag ? tl.drag.kind : "-"}`));
+  setInterval(() => {
+    const c = typeof actx !== "undefined" && actx, ts = c && c.getOutputTimestamp ? c.getOutputTimestamp() : null;
+    const clock = c ? `ac=${c.state} t=${f(c.currentTime, 3)} ots=${ts ? f(ts.contextTime, 3) + "@" + f(ts.performanceTime, 0) : "-"} pn=${f(performance.now(), 0)} lat=${f(c.outputLatency, 3)}/${f(c.baseLatency, 3)}` : "ac=none";
+    const pl = els.map(e => `${who(e)}${e.itemId ?? "-"}:${e.paused ? "P" : "R"}${e.seeking ? "S" : ""} ct=${f(e.currentTime)} rs=${e.readyState} r=${e.playbackRate}${e.runTo != null ? " run=" + f(e.runTo) : ""}${e.shown ? " shown" : ""}`).join(" ");
+    const s = `${ms()} T=${f(V.T)} ${V.playing ? (pa ? "PLAY" : "WAIT") : "stop"} draws=${pv.draws} ${clock} | ${pl}`;
+    add(s);
+    if (!live.hidden) live.textContent = s.replace(" | ", "\n");
+  }, 100);
+}
 /* ---------- For AI assistants ----------
    window.hookd lets an assistant that drives the browser for someone (like Claude in
    Chrome) read and change the edit exactly, instead of guessing at clicks. The guide
