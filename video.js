@@ -1437,6 +1437,7 @@ function stepFrames(n) {
 }
 
 function seekPlayer(e, t) { e.currentTime = t; e.seekAt = performance.now(); }
+function setRate(e, r) { if (e.playbackRate !== r) e.playbackRate = r; }
 // Put the players on the videos the timeline needs at time T (photos need none).
 function syncPlayers(P, T) {
   const vid = it => it.kind === "clip" && !it.c.src.photo;
@@ -1469,14 +1470,19 @@ function syncPlayers(P, T) {
     if (w.on && V.playing) {
       // a player takes a moment to get going, so it starts ahead by about as long as a seek takes
       const lead = Math.max(0.12, e.seekLag || 0);
-      if (busy) e.playbackRate = 1;
-      else if (e.paused || off > 0.5) { seekPlayer(e, Math.min(c.out, w.t + lead)); e.playbackRate = 1; }
-      else e.playbackRate = clamp(1 - drift * 3, 0.8, 1.25);   // ease back into step with the sound
+      if (busy) setRate(e, 1);
+      else if (e.paused || off > 0.5) { seekPlayer(e, Math.min(c.out, w.t + lead)); setRate(e, 1); }
+      // ease back into step with the sound in coarse steps, leaving a small drift alone: phone
+      // players stutter when the speed changes every frame
+      else setRate(e, off < 0.04 ? 1 : clamp(Math.round((1 - drift * 3) * 20) / 20, 0.8, 1.25));
       if (e.paused) e.play().catch(() => {});
     } else {
       if (!e.paused) e.pause();
-      e.playbackRate = 1;
-      if (off > 0.02 && !busy) seekPlayer(e, w.t);
+      setRate(e, 1);
+      // while scrubbing, a quick seek to the nearest keyframe keeps the picture up with the finger;
+      // the exact frame follows once it stops
+      const quick = tl.drag && tl.drag.kind === "scrub" && e.fastSeek;
+      if (off > (quick ? 0.25 : 0.02) && !busy) { if (quick) { e.fastSeek(w.t); e.seekAt = performance.now(); } else seekPlayer(e, w.t); }
     }
   }
 }
@@ -1847,7 +1853,7 @@ tl.cv.addEventListener("pointermove", e => {
     tl.cv.style.cursor = h ? (h.join != null ? "pointer" : h.edge ? "ew-resize" : "grab") : "pointer";
     return;
   }
-  if (d.kind === "scrub") { vSeek(tOf(x)); return; }
+  if (d.kind === "scrub") { V.T = clamp(tOf(x), 0, vtotal()); return; }   // paused: the next frame draws it, once
   if (d.kind === "cap") {
     // captions move in their video's own time, between their neighbours
     const c = d.cap, dt = (x - d.x0) / pps(), MIN = 0.3;
