@@ -294,6 +294,10 @@ select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; b
 .vtab { display: grid; gap: 10px; }
 .vform { display: grid; gap: 8px; }
 .vform select, .vtab > select { width: 100%; }
+.vphoto-len { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.vphoto-len input { width: 5.5em; }
+#vMotion { justify-self: start; border-radius: 18px; }
+#vPhotoBox { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .vtab .btn { justify-self: start; }
 .vmusic { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
 .vshapes { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
@@ -620,9 +624,22 @@ img { max-width: 100%; }
           <button type="button" class="icon-btn vsheet-x" id="vSheetX" aria-label="Hide the tools"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
 
           <div class="vtab" data-panel="clips">
-            <button type="button" class="btn primary" id="vAdd">Add videos</button>
-            <input type="file" id="vFileIn" accept="video/mp4,video/quicktime,.mp4,.mov,.m4v" multiple hidden>
-            <p class="vhelp">MP4 or MOV, or drop them anywhere on this page. They join up in order.</p>
+            <div class="vform" id="vPhotoBox" hidden>
+              <span class="label">Selected photo</span>
+              <label class="vphoto-len">Show for <input type="number" id="vPhotoLen" class="vname" min="0.1" max="300" step="0.1" inputmode="decimal"> seconds</label>
+              <span class="label">Movement</span>
+              <div class="seg" id="vMotion" role="group" aria-label="Movement">
+                <button type="button" data-motion="" aria-pressed="true">None</button>
+                <button type="button" data-motion="in" aria-pressed="false">Zoom in</button>
+                <button type="button" data-motion="out" aria-pressed="false">Zoom out</button>
+                <button type="button" data-motion="left" aria-pressed="false">Pan left</button>
+                <button type="button" data-motion="right" aria-pressed="false">Pan right</button>
+              </div>
+              <button type="button" class="btn quiet" id="vPhotoAll">Use this length and movement for every photo</button>
+            </div>
+            <button type="button" class="btn primary" id="vAdd">Add videos or photos</button>
+            <input type="file" id="vFileIn" accept="video/mp4,video/quicktime,.mp4,.mov,.m4v,image/*" multiple hidden>
+            <p class="vhelp">MP4 or MOV videos and JPG, PNG or WebP photos, or drop them anywhere on this page. They join up in order.</p>
             <div class="vedit">
               <button type="button" class="btn" id="vSplit" title="Split the clip at the playhead (S)">Split</button>
               <button type="button" class="btn" id="vDelete" title="Remove the selected clip (Delete)">Delete</button>
@@ -873,7 +890,7 @@ img { max-width: 100%; }
           <video id="vA" playsinline muted preload="auto"></video>
           <video id="vB" playsinline muted preload="auto"></video>
           <canvas id="vCanvas" role="img" aria-label="Preview of your video"></canvas>
-          <div class="vempty" id="vEmpty">Add a video to start editing</div>
+          <div class="vempty" id="vEmpty">Add videos or photos to start editing</div>
         </div>
         <div class="vtransport">
           <button type="button" class="btn primary" id="vPlay">Play</button>

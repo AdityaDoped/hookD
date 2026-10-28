@@ -300,6 +300,66 @@ async function openSource(file) {
   };
 }
 
+/* ---------- Photos ----------
+   A photo is a source with no sound that can be shown for as long as you like.
+   Pictures are decoded when they're needed and only a few are kept, so a phone
+   with lots of photos in the edit doesn't run out of memory. */
+const PHOTO_LEN = 3;       // how long a new photo shows, in seconds
+const PHOTO_MAX = 300;     // the longest a photo can be stretched
+const PHOTO_PX = 2560;     // enough for a 1080p export with room to zoom in; 4K exports scale up from here
+const PHOTO_KEEP = 6;      // decoded photos kept at once
+const isPhoto = f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|avif|heic|heif)$/i.test(f.name);
+function shrink(img, max) {
+  const k = Math.min(1, max / Math.max(img.width, img.height)), cv = document.createElement("canvas");
+  cv.width = Math.max(1, Math.round(img.width * k)); cv.height = Math.max(1, Math.round(img.height * k));
+  const g = cv.getContext("2d"); g.imageSmoothingQuality = "high"; g.drawImage(img, 0, 0, cv.width, cv.height);
+  return cv;
+}
+async function decodePhoto(file) {
+  try { return await createImageBitmap(file); }   // turned upright from the camera's orientation tag
+  catch (e) { throw new Error(/hei[cf]$/i.test(file.name) ? "this browser can't open HEIC photos. Save it as JPG first" : "this picture couldn't be opened"); }
+}
+const photoCache = new Map();   // source id -> { pic, p }, most recently used last
+function cachePhoto(id, e) {
+  photoCache.delete(id); photoCache.set(id, e);
+  for (const [k, old] of photoCache) {
+    if (photoCache.size <= PHOTO_KEEP) break;
+    photoCache.delete(k);
+    if (old.pic) old.pic.width = 0;   // hands the memory back now (Safari holds on to canvases)
+  }
+}
+// The picture if it's ready; otherwise starts decoding it and returns null.
+function photoPic(s) {
+  let e = photoCache.get(s.id);
+  if (!e) e = { pic: null, p: decodePhoto(s.file).then(b => { e.pic = shrink(b, PHOTO_PX); b.close(); return e.pic; }) };
+  cachePhoto(s.id, e);
+  return e.pic;
+}
+const photoReady = s => photoPic(s) || photoCache.get(s.id).p;
+async function openPhoto(file) {
+  const b = await decodePhoto(file), pic = shrink(b, PHOTO_PX), thumb = shrink(b, 160);
+  b.close();
+  const s = {
+    id: V.nextId++, file, name: cleanName(file.name), photo: true, thumb,
+    frames: null, start: 0, end: PHOTO_MAX, fps: 30, rot: 0, w: pic.width, h: pic.height,
+    audio: null, aOff: 0, peaks: null, levels: null, voiceThr: 1, noSound: true, color: V.sources.length % 6,
+  };
+  cachePhoto(s.id, { pic, p: Promise.resolve(pic) });
+  return s;
+}
+const openMedia = file => isPhoto(file) ? openPhoto(file) : openSource(file);
+
+// Slow movement over a photo: how much bigger and how far across, p from 0 to 1 through the clip.
+const MOTIONS = { in: "Zoom in", out: "Zoom out", left: "Pan left", right: "Pan right" };
+function motionAt(type, p) {
+  const e = 0.5 - 0.5 * Math.cos(Math.PI * clamp(p, 0, 1)), Z = 0.12;
+  if (type === "in") return { s: 1 + Z * e, dx: 0 };
+  if (type === "out") return { s: 1 + Z * (1 - e), dx: 0 };
+  if (type === "left") return { s: 1 + Z, dx: Z / 3 * (1 - 2 * e) };
+  if (type === "right") return { s: 1 + Z, dx: -Z / 3 * (1 - 2 * e) };
+  return null;
+}
+
 /* ---------- Timeline plan ----------
    The title card (if on) and the clips in order, each with its place on the
    timeline and the transition into it. A crossfade overlaps two clips; fade
@@ -374,6 +434,7 @@ function locate(T) {
 function frameSnap(src, t) {
   const f = src.frames;
   if (t >= src.end - 1e-6) return src.end;
+  if (!f) return Math.round(t * src.fps) / src.fps;   // a photo: any 1/30 s
   let lo = 0, hi = f.length - 1;
   while (lo < hi) { const m = (lo + hi) >> 1; if (f[m] < t) lo = m + 1; else hi = m; }
   return lo > 0 && t - f[lo - 1] < f[lo] - t ? f[lo - 1] : f[lo];
@@ -818,7 +879,8 @@ function drawMedia(g, W, H, m, scale, alpha, fill = V.fit === "fill") {
     g.drawImage(blurCv, 0, 0, W, H);
     g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(0, 0, W, H);
   }
-  drawRotated(g, m.img, m.w, m.h, m.rot, W / 2, H / 2, (fill ? cover : fit) * scale);
+  const mv = m.move || { s: 1, dx: 0 };   // a photo's slow zoom or pan (the blurred bars stay still)
+  drawRotated(g, m.img, m.w, m.h, m.rot, W / 2 + mv.dx * W, H / 2, (fill ? cover : fit) * scale * mv.s);
   // warmth: a soft orange (or blue) wash over the picture
   if (V.enh.warm) {
     g.filter = "none"; g.globalCompositeOperation = "soft-light";
@@ -1159,7 +1221,9 @@ function compose(g, W, H, st, getImg) {
   const top = st.layers.filter(L => L.it.kind === "clip").at(-1);
   for (const L of st.layers) {
     if (L.it.kind === "title") { drawTitle(g, W, H, L.alpha); continue; }
-    const m = getImg(L);
+    let m = getImg(L);
+    const c = L.it.c;
+    if (m && c.motion) m = { ...m, move: motionAt(c.motion, (L.src - c.in) / clipLen(c)) };
     if (cover) { if (L === top) drawCover(g, W, H, st.t, V.title.dur, L, m); }
     else if (!m) continue;
     else if (L.panels != null) drawPanels(g, W, H, m, L);
@@ -1311,11 +1375,12 @@ function stepFrames(n) {
   vPause(); vSeek(V.T + n / (c.src.fps || 30));
 }
 
-// Put the players on the clips the timeline needs at time T.
+// Put the players on the videos the timeline needs at time T (photos need none).
 function syncPlayers(P, T) {
-  const want = layersAt(P, T).layers.filter(L => L.it.kind === "clip").map(L => ({ it: L.it, t: L.src, on: true }));
+  const vid = it => it.kind === "clip" && !it.c.src.photo;
+  const want = layersAt(P, T).layers.filter(L => vid(L.it)).map(L => ({ it: L.it, t: L.src, on: true }));
   if (want.length < 2) {
-    const next = P.items.find(it => it.kind === "clip" && it.start > T);
+    const next = P.items.find(it => vid(it) && it.start > T);
     if (next) want.push({ it: next, t: next.c.in, on: false });
   }
   const free = els.filter(e => !want.some(w => w.it.c.id === e.itemId));
@@ -1359,8 +1424,17 @@ function vtick() {
   const st = layersAt(P, V.T), imgs = new Map();
   st.cap = capAt(P, V.T); st.t = V.T; st.P = P;
   markActiveCap(st.cap);
+  // the next photo starts decoding before it's needed
+  const next = P.items.find(it => it.kind === "clip" && it.c.src.photo && it.start > V.T);
+  if (next) photoPic(next.c.src);
   for (const L of st.layers) {
     if (L.it.kind !== "clip") continue;
+    if (L.it.c.src.photo) {
+      const pic = photoPic(L.it.c.src);
+      if (!pic) return;
+      imgs.set(L.it, { img: pic, w: pic.width, h: pic.height, rot: 0 });
+      continue;
+    }
     const e = pv.map.get(L.it.c.id);
     if (!e || e.readyState < 2 || !e.videoWidth) return;
     imgs.set(L.it, { img: e, w: e.videoWidth, h: e.videoHeight, rot: 0 });   // the player has already turned it upright
@@ -1492,7 +1566,10 @@ function drawClip(g, c, x0, x1, selected, alpha) {
   g.clip();
   // sound waveform, so pauses and mistakes are easy to spot
   const s = c.src, mid = y + h * 0.64, amp = h * 0.26, p = pps();
-  if (s.peaks) {
+  if (s.photo) {   // the photo, repeated along its clip
+    const th = h - 28, tw = th * s.thumb.width / s.thumb.height;
+    for (let x = l + 4; x < Math.min(l + w, W); x += tw + 4) if (x + tw > 0) g.drawImage(s.thumb, x, y + 23, tw, th);
+  } else if (s.peaks) {
     g.fillStyle = col;
     for (let px = Math.max(Math.floor(l), 0); px < Math.min(l + w, W); px += 2) {
       const st = c.in + (px - x0) / p, en = st + 2 / p;
@@ -1508,7 +1585,7 @@ function drawClip(g, c, x0, x1, selected, alpha) {
   }
   if (w > 40) {
     g.fillStyle = C.ink; g.font = `600 12px ${C.body || "sans-serif"}`; g.textBaseline = "middle";
-    g.fillText(`${s.name} · ${fmt(clipLen(c), 1)}`, l + 8, y + 14, Math.max(0, w - 16));
+    g.fillText(`${s.name} · ${fmt(clipLen(c), 1)}${c.motion ? " · " + MOTIONS[c.motion] : ""}`, l + 8, y + 14, Math.max(0, w - 16));
   }
   g.restore();
 }
@@ -1842,8 +1919,8 @@ function audioBlock(P, sr, a, n) {
   for (let i = 0; i < n; i++) { data[i] = clamp(L[i], -1, 1); data[n + i] = clamp(R[i], -1, 1); }
   return data;
 }
-// The common frame rate closest to the first video's (so 60 fps footage stays 60).
-function exportFps() { const f = V.clips[0].src.fps; return [24, 25, 30, 50, 60].reduce((a, b) => Math.abs(b - f) < Math.abs(a - f) ? b : a); }
+// The common frame rate closest to the first video's (so 60 fps footage stays 60); 30 for only photos.
+function exportFps() { const v = V.clips.find(c => !c.src.photo), f = v ? v.src.fps : 30; return [24, 25, 30, 50, 60].reduce((a, b) => Math.abs(b - f) < Math.abs(a - f) ? b : a); }
 // Bits per pixel: Standard looks right in a feed; Best leaves room for the apps to compress it again.
 // Best stops at 60 Mbps: asked for 80 at 4K, a laptop's hardware encoder dropped to about 9.
 function videoRate(W, H, fps) { const best = V.out.quality === "best"; return clamp(Math.round(W * H * fps * (best ? 0.28 : 0.14)), 2e6, best ? 60e6 : 40e6); }
@@ -1918,6 +1995,11 @@ async function vExport() {
       for (const [it, r] of readers) if (it.end <= t) { r.close(); readers.delete(it); }
       for (const L of st.layers) {
         if (L.it.kind !== "clip") continue;
+        if (L.it.c.src.photo) {
+          const pic = await photoReady(L.it.c.src);
+          imgs.set(L.it, { img: pic, w: pic.width, h: pic.height, rot: 0 });
+          continue;
+        }
         let r = readers.get(L.it);
         if (!r) { r = new ClipReader(L.it.c); readers.set(L.it, r); }
         const f = await r.frameAt(L.src);
@@ -1962,8 +2044,8 @@ async function vExport() {
 
 /* ---------- Adding videos and music ---------- */
 async function addVideos(files) {
-  files = [...files].filter(f => /^video\//.test(f.type) || /\.(mp4|mov|m4v)$/i.test(f.name));
-  if (!files.length) { vStatus("Add MP4 or MOV videos.", true); return; }
+  files = [...files].filter(f => /^video\//.test(f.type) || /\.(mp4|mov|m4v)$/i.test(f.name) || isPhoto(f));
+  if (!files.length) { vStatus("Add MP4 or MOV videos, or photos.", true); return; }
   if (V.exporting) { vStatus("Wait for the export to finish first.", true); return; }
   vPause();
   const before = snap(), failed = [], added = [];
@@ -1972,10 +2054,10 @@ async function addVideos(files) {
     vStatus(`Reading ${f.name} (${n + 1} of ${files.length})…`);
     await sleep(0);
     try {
-      const s = await openSource(f);
+      const s = await openMedia(f);
       V.sources.push(s); added.push(s);
       storeFile("src-" + s.id, f);
-      V.clips.push({ id: V.nextId++, src: s, in: s.start, out: s.end, trans: null });
+      V.clips.push({ id: V.nextId++, src: s, in: s.start, out: s.photo ? PHOTO_LEN : s.end, trans: null });
       if (!$("#vName").value.trim()) $("#vName").value = s.name;
     } catch (e) { failed.push(`${f.name}: ${(e && e.message) || "it couldn't be read"}`); }
   }
@@ -1984,10 +2066,12 @@ async function addVideos(files) {
     commit(before);
     requestAnimationFrame(() => { sizeTimeline(); sizePreview(); vtick(); });
   }
-  const msg = (added.length ? `Added ${added.length} video${added.length > 1 ? "s" : ""}. ` : "") + (failed.length ? `Couldn't open ${failed.join("; ")}.` : "");
+  const np = added.filter(s => s.photo).length, nv = added.length - np;
+  const what = [nv && `${nv} video${nv > 1 ? "s" : ""}`, np && `${np} photo${np > 1 ? "s" : ""}`].filter(Boolean).join(" and ");
+  const msg = (added.length ? `Added ${what}. ` : "") + (failed.length ? `Couldn't open ${failed.join("; ")}.` : "");
   vStatus(msg.trim(), failed.length > 0);
   if (added.length && enhKey() !== "0:0") processVoices();
-  const silent = added.filter(s => s.noSound);
+  const silent = added.filter(s => s.noSound && !s.photo);
   if (silent.length) toast(`${silent.map(s => s.name).join(", ")} has no sound Hookd can read, so it will be silent.`);
 }
 async function addMusic(file) {
@@ -2054,7 +2138,7 @@ function projectData() {
   return {
     v: 1, nextId: V.nextId, name: $("#vName").value,
     sources: V.sources.map(s => ({ id: s.id, name: s.name, color: s.color })),
-    clips: V.clips.map(c => ({ id: c.id, src: c.src.id, in: c.in, out: c.out, trans: c.trans || null })),
+    clips: V.clips.map(c => ({ id: c.id, src: c.src.id, in: c.in, out: c.out, trans: c.trans || null, motion: c.motion || null })),
     caps: V.caps.map(k => ({ id: k.id, src: k.src.id, s: k.s, e: k.e, text: k.text })),
     chapters: V.chapters.map(c => ({ ...c, src: c.src.id })),
     title: V.title, banner: V.banner, look: V.look, out: V.out, shape: V.shape, fit: V.fit, capLook: V.capLook, enh: V.enh,
@@ -2081,7 +2165,8 @@ async function vRestore() {
     try {
       const file = await vstore.getFile("src-" + saved.id);
       if (!file) throw new Error("missing");
-      const s = await openSource(file);
+      const s = await openMedia(file);
+      if (s.photo) { const e = photoCache.get(s.id); photoCache.delete(s.id); if (e) cachePhoto(saved.id, e); }   // file it under the saved id
       Object.assign(s, { id: saved.id, name: saved.name, color: saved.color });
       V.sources.push(s); byId.set(saved.id, s);
     } catch (e) { failed++; }
@@ -2130,7 +2215,8 @@ async function startOver() {
   clearTimeout(startOverArmed); startOverArmed = 0; b.textContent = "Start over"; b.classList.remove("danger");
   if (capJob) cancelAutoCaptions();
   vPause();
-  V.sources.forEach(s => URL.revokeObjectURL(s.url));
+  V.sources.forEach(s => { if (s.url) URL.revokeObjectURL(s.url); });
+  photoCache.clear();
   // the style (colours, font, caption look, banner name) stays for the next video in the series
   Object.assign(V, { sources: [], clips: [], caps: [], chapters: [], undo: [], redo: [], sel: -1, selJoin: -1, selCap: null, T: 0, music: null, cover: null });
   Object.assign(V.title, { on: false, text: "", dur: 3 });
@@ -2536,6 +2622,13 @@ function updateUi() {
   $("#vExport").classList.toggle("primary", !busy);
   $("#vAdd").classList.toggle("primary", !has);
   $("#vZoom").disabled = !has;
+  // the selected photo's length and movement
+  const ph = V.clips[V.sel], isPh = !!ph && ph.src.photo;
+  $("#vPhotoBox").hidden = !isPh;
+  if (isPh) {
+    if (document.activeElement !== $("#vPhotoLen")) $("#vPhotoLen").value = +clipLen(ph).toFixed(2);
+    document.querySelectorAll("#vMotion [data-motion]").forEach(b => b.setAttribute("aria-pressed", b.dataset.motion === (ph.motion || "")));
+  }
   // transitions
   const j = V.selJoin, c = V.clips[j], tr = c && c.trans;
   $("#vTransEdit").hidden = !c || j < 1;
@@ -2635,6 +2728,30 @@ $("#vTabs").addEventListener("click", e => {
   else showTab(b.dataset.tab);
 });
 $("#vSheetX").addEventListener("click", () => setSheet(false));
+// photos: how long each shows and how it moves
+function editPhoto(fn) {
+  const c = V.clips[V.sel];
+  if (!c || !c.src.photo || V.exporting) return;
+  const before = snap();
+  V.clips[V.sel] = { ...c, ...fn(c) };
+  commit(before);
+}
+$("#vPhotoLen").addEventListener("change", e => {
+  const len = clamp(+e.target.value || PHOTO_LEN, MIN_CLIP, PHOTO_MAX);
+  editPhoto(c => ({ out: Math.min(PHOTO_MAX, c.in + len) }));
+});
+$("#vMotion").addEventListener("click", e => {
+  const b = e.target.closest("[data-motion]");
+  if (b) editPhoto(() => ({ motion: b.dataset.motion || null }));
+});
+$("#vPhotoAll").addEventListener("click", () => {
+  const c = V.clips[V.sel];
+  if (!c || !c.src.photo || V.exporting) return;
+  const before = snap(), len = clipLen(c);
+  V.clips = V.clips.map(k => k.src.photo ? { ...k, in: 0, out: len, motion: c.motion || null } : k);
+  commit(before);
+  vStatus(`Every photo now shows for ${fmt(len, 1)}${c.motion ? " with " + MOTIONS[c.motion].toLowerCase() : ""}.`);
+});
 $("#vTopExport").addEventListener("click", () => showTab("export"));
 $("#vHome").addEventListener("click", () => { setMode("build"); scrollTo(0, 0); });
 // transitions
